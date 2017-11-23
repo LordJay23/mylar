@@ -14,7 +14,7 @@
 #  along with Mylar.  If not, see <http://www.gnu.org/licenses/>.
 
 import os
-import glob, urllib, urllib2
+import glob, urllib, urllib2, socket
 
 import lib.simplejson as simplejson
 
@@ -169,3 +169,5 @@ def getArtwork(ComicID=None, imageURL=None):
     else:
         artwork_file = os.path.basename(artwork_path)
         return "cache/artwork/" + artwork_file
+
+
