@@ -313,20 +313,12 @@ class PostProcessor(object):
                 logger.fdebug (module + ' Manual Run initiated')
                 #Manual postprocessing on a folder.
                 #first we get a parsed results list  of the files being processed, and then poll against the sql to get a short list of hits.
-                flc = filechecker.FileChecker(self.nzb_folder, justparse=True)
+                flc = filechecker.FileChecker(self.nzb_folder, justparse=True, pp_mode=True)
                 filelist = flc.listFiles()
                 if filelist['comiccount'] == 0: # is None:
                     logger.warn('There were no files located - check the debugging logs if you think this is in error.')
                     return
                 logger.info('I have located ' + str(filelist['comiccount']) + ' files that I should be able to post-process. Continuing...')
-
-                #load the hashes for torrents so continual post-processing of same issues don't occur.
-                pp_crclist = []
-                if mylar.CONFIG.ENABLE_TORRENTS:
-                    pp_crc = myDB.select("SELECT a.crc, b.IssueID FROM Snatched as a INNER JOIN issues as b ON a.IssueID=b.IssueID WHERE a.Status='Post-Processed' and a.crc is not NULL and (b.Status='Downloaded' or b.status='Archived ORDER BY b.IssueDate')")
-                    for pp in pp_crc:
-                        pp_crclist.append({'IssueID':   pp['IssueID'],
-                                           'crc':       pp['crc']})
 
                 #preload the entire ALT list in here.
                 alt_list = []
@@ -343,13 +335,6 @@ class PostProcessor(object):
                 manual_arclist = []
 
                 for fl in filelist['comiclist']:
-                    if mylar.CONFIG.ENABLE_TORRENTS:
-                        crcchk = None
-                        tcrc = helpers.crc(os.path.join(fl['comiclocation'], fl['comicfilename'].decode(mylar.SYS_ENCODING)))
-                        crcchk = [x for x in pp_crclist if tcrc == x['crc']]
-                        if crcchk:
-                           logger.fdebug('%s Already post-processed this item %s - Ignoring' % (module, crcchk))
-                           continue
 
                     as_d = filechecker.FileChecker()
                     as_dinfo = as_d.dynamic_replace(helpers.conversion(fl['series_name']))
@@ -590,6 +575,8 @@ class PostProcessor(object):
                                                             "IssueID":         issuechk['IssueID'],
                                                             "IssueNumber":     issuechk['Issue_Number'],
                                                             "ComicName":       cs['ComicName'],
+                                                            "Series":          watchmatch['series_name'],
+                                                            "AltSeries":       watchmatch['alt_series'],
                                                             "One-Off":         False})
                                     else:
                                         logger.fdebug(module + '[NON-MATCH: ' + cs['ComicName'] + '-' + cs['ComicID'] + '] Incorrect series - not populating..continuing post-processing')
@@ -599,8 +586,25 @@ class PostProcessor(object):
                                     continue
 
                         logger.fdebug(module + '[SUCCESSFUL MATCH: ' + cs['ComicName'] + '-' + cs['ComicID'] + '] Match verified for ' + helpers.conversion(fl['comicfilename']))
-                        break
+                        continue #break
 
+                    mlp = []
+
+                    xmld = filechecker.FileChecker()
+                    #mod_seriesname = as_dinfo['mod_seriesname']
+                    for x in manual_list:
+                        xmld1 = xmld.dynamic_replace(helpers.conversion(x['ComicName']))
+                        xseries = xmld1['mod_seriesname'].lower()
+                        xmld2 = xmld.dynamic_replace(helpers.conversion(x['Series']))
+                        xfile = xmld2['mod_seriesname'].lower()
+                        if re.sub('\|', '', xseries).strip() == re.sub('\|', '', xfile).strip():
+                            logger.fdebug(module + '[DEFINITIVE-NAME MATCH] Definitive name match exactly to : %s [%s]' % (x['ComicName'], x['ComicID']))
+                            mlp.append(x)
+                        else:
+                            pass
+                    if len(mlp) == 1:
+                        manual_list = mlp 
+                        logger.fdebug(module + '[CONFIRMED-FORCE-OVERRIDE] Over-ride of matching taken due to exact name matching of series')
 
                     #we should setup for manual post-processing of story-arc issues here
                     #we can also search by ComicID to just grab those particular arcs as an alternative as well (not done)
@@ -661,12 +665,12 @@ class PostProcessor(object):
                             res[acv['ComicName']].append({"ArcValues":     acv['ArcValues'],
                                                           "WatchValues":   acv['WatchValues']})
 
+                    if len(res) > 0:
+                        logger.fdebug('%s Now Checking if %s issue(s) may also reside in one of the storyarc\'s that I am watching.' % (module, len(res)))
                     for k,v in res.items():
                         i = 0
                         #k is ComicName
                         #v is ArcValues and WatchValues
-                        if len(v) > 0:
-                            logger.fdebug('%s Now Checking if %s issue(s) may also reside in one of the storyarc\'s that I am watching.' % (module, len(v)))
                         while i < len(v):
                             if k is None or k == 'None':
                                 pass
@@ -1029,7 +1033,8 @@ class PostProcessor(object):
                     sarc = nzbiss['SARC']
                     self.oneoff = nzbiss['OneOff']
                     tmpiss = myDB.selectone('SELECT * FROM issues WHERE IssueID=?', [issueid]).fetchone()
-
+                    if tmpiss is None:
+                        tmpiss = myDB.selectone('SELECT * FROM annuals WHERE IssueID=?', [issueid]).fetchone()
                     comicid = None
                     comicname = None
                     issuenumber = None

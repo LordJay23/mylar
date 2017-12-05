@@ -36,7 +36,7 @@ from mylar import logger, helpers
 
 class FileChecker(object):
 
-    def __init__(self, dir=None, watchcomic=None, Publisher=None, AlternateSearch=None, manual=None, sarc=None, justparse=None, file=None):
+    def __init__(self, dir=None, watchcomic=None, Publisher=None, AlternateSearch=None, manual=None, sarc=None, justparse=None, file=None, pp_mode=False):
         #dir = full path to the series Comic Location (manual pp will just be psssing the already parsed filename)
         if dir:
             self.dir = dir
@@ -90,6 +90,10 @@ class FileChecker(object):
         else:
             self.file = None
 
+        if pp_mode:
+            self.pp_mode = True
+        else:
+            self.pp_mode = False
 
         self.failed_files = []
         self.dynamic_handlers = ['/','-',':','\'',',','&','?','!','+','(',')','\u2014']
@@ -132,7 +136,7 @@ class FileChecker(object):
                 if filename.startswith('.'):
                     continue
 
-                logger.info('[FILENAME]: ' + filename)
+                #logger.info('[FILENAME]: ' + filename)
                 runresults = self.parseit(self.dir, filename, filedir)
                 if runresults:
                     try:
@@ -905,7 +909,7 @@ class FileChecker(object):
             series_name_decoded= unicodedata.normalize('NFKD', helpers.conversion(series_name)).encode('ASCII', 'ignore')
 
             #check for annual in title(s) here.
-            if mylar.CONFIG.ANNUALS_ON:
+            if not self.justparse and mylar.CONFIG.ANNUALS_ON and 'annual' not in self.watchcomic.lower():
                 if 'annual' in series_name.lower():
                     issue_number = 'Annual ' + str(issue_number)
                     series_name = re.sub('annual', '', series_name, flags=re.I).strip()
@@ -998,7 +1002,7 @@ class FileChecker(object):
 
             justthedigits = series_info['issue_number']
 
-            if mylar.CONFIG.ANNUALS_ON:
+            if mylar.CONFIG.ANNUALS_ON and 'annual' not in nspace_watchcomic.lower():
                 if 'annual' in series_name.lower():
                     justthedigits = 'Annual ' + series_info['issue_number']
                 nspace_seriesname = re.sub('annual', '', nspace_seriesname.lower()).strip()
@@ -1087,6 +1091,8 @@ class FileChecker(object):
                         'comiclocation':   series_info['comiclocation'],
                         'series_name':     series_info['series_name'],
                         'series_volume':   series_info['series_volume'],
+                        'alt_series':      series_info['alt_series'],
+                        'alt_issue':       series_info['alt_issue'],
                         'issue_year':      series_info['issue_year'],
                         'justthedigits':   justthedigits,
                         'annual_comicid':  annual_comicid,
@@ -1099,6 +1105,8 @@ class FileChecker(object):
                         'sub':            series_info['sub'],
                         'comiclocation':  series_info['comiclocation'],
                         'series_name':    series_info['series_name'],
+                        'alt_series':      series_info['alt_series'],
+                        'alt_issue':       series_info['alt_issue'],
                         'issue_number':   series_info['issue_number'],
                         'series_volume':  series_info['series_volume'],
                         'issue_year':     series_info['issue_year'],
@@ -1114,6 +1122,15 @@ class FileChecker(object):
 
         dir = dir.encode(mylar.SYS_ENCODING)
 
+        if all([mylar.CONFIG.ENABLE_TORRENTS is True, self.pp_mode is True]):
+            import db
+            myDB = db.DBConnection()
+            pp_crclist =[]
+            pp_crc = myDB.select("SELECT a.crc, b.IssueID FROM Snatched as a INNER JOIN issues as b ON a.IssueID=b.IssueID WHERE (a.Status='Post-Processed' or a.status='Snatched' or a.provider='32P' or a.provider='WWT' or a.provider='DEM') and a.crc is not NULL and (b.Status='Downloaded' or b.status='Archived') GROUP BY a.crc ORDER BY a.DateAdded")
+            for pp in pp_crc:
+                pp_crclist.append({'IssueID':   pp['IssueID'],
+                                   'crc':       pp['crc']})
+
         for (dirname, subs, files) in os.walk(dir):
 
             for fname in files:
@@ -1123,6 +1140,13 @@ class FileChecker(object):
                     direc = dirname
                     if '.AppleDouble' in direc:
                         #Ignoring MAC OS Finder directory of cached files (/.AppleDouble/<name of file(s)>)
+                        continue
+
+                if all([mylar.CONFIG.ENABLE_TORRENTS is True, self.pp_mode is True]):
+                    tcrc = helpers.crc(os.path.join(dirname, fname).decode(mylar.SYS_ENCODING))
+                    crcchk = [x for x in pp_crclist if tcrc == x['crc']]
+                    if crcchk:
+                        #logger.fdebug('%s Already post-processed this item %s - Ignoring' % fname)
                         continue
 
                 if os.path.splitext(fname)[1].lower().endswith(comic_ext):

@@ -2364,7 +2364,23 @@ def issue_find_ids(ComicName, ComicID, pack, IssueNumber):
     issuelist = myDB.select("SELECT * FROM issues WHERE ComicID=?", [ComicID])
 
     if 'Annual' not in pack:
-        pack_issues = range(int(pack[:pack.find('-')]),int(pack[pack.find('-')+1:])+1)
+        packlist = [x.strip() for x in pack.split(',')]
+        plist = []
+        pack_issues = []
+        for pl in packlist:
+            if '-' in pl:
+                plist.append(range(int(pl[:pl.find('-')]),int(pl[pl.find('-')+1:])+1))
+            else:
+                plist.append(int(pl))
+
+        for pi in plist:
+            if type(pi) == list:
+                for x in pi:
+                    pack_issues.append(x)
+            else:
+                pack_issues.append(pi)
+
+        pack_issues.sort()
         annualize = False
     else:
         #remove the annuals wording
@@ -2859,7 +2875,12 @@ def weekly_info(week=None, year=None):
     else:
         weekdst = mylar.CONFIG.DESTINATION_DIR
 
-    weekly_last = datetime.datetime.fromtimestamp(mylar.SCHED_WEEKLY_LAST)
+    if mylar.SCHED_WEEKLY_LAST is not None:
+        weekly_stamp = datetime.datetime.fromtimestamp(mylar.SCHED_WEEKLY_LAST)
+        weekly_last = weekly_stamp.replace(microsecond=0)
+    else:
+        weekly_last = 'None'
+
     weekinfo = {'weeknumber':         weeknumber,
                 'startweek':          con_startweek,
                 'midweek':            midweek.strftime('%Y-%m-%d'),
@@ -2870,12 +2891,15 @@ def weekly_info(week=None, year=None):
                 'next_weeknumber':    next_week,
                 'next_year':          next_year,
                 'current_weeknumber': current_weeknumber,
-                'last_update':        weekly_last.replace(microsecond=0)}
+                'last_update':        weekly_last}
 
-    if mylar.CONFIG.WEEKFOLDER_FORMAT == 0:
-        weekfold = os.path.join(weekdst, str( str(weekinfo['year']) + '-' + str(weeknumber) ))
+    if weekdst is not None:
+        if mylar.CONFIG.WEEKFOLDER_FORMAT == 0:
+            weekfold = os.path.join(weekdst, str( str(weekinfo['year']) + '-' + str(weeknumber) ))
+        else:
+            weekfold = os.path.join(weekdst, str( str(weekinfo['midweek']) ))
     else:
-        weekfold = os.path.join(weekdst, str( str(weekinfo['midweek']) ))
+        weekfold = None
 
     weekinfo['week_folder'] = weekfold
 
@@ -2926,10 +2950,10 @@ def nzb_monitor(queue):
         if item == 'exit':
             logger.info('Cleaning up workers for shutdown')
             break
-        if mylar.CONFIG.SAB_CLIENT_POST_PROCESSING is True:
+        if all([mylar.USE_SABNZBD is True, mylar.CONFIG.SAB_CLIENT_POST_PROCESSING is True]):
            nz = sabnzbd.SABnzbd(item)
            nzstat = nz.processor()
-        elif mylar.CONFIG.NZBGET_CLIENT_POST_PROCESSING is True:
+        elif all([mylar.USE_NZBGET is True, mylar.CONFIG.NZBGET_CLIENT_POST_PROCESSING is True]):
            nz = nzbget.NZBGet()
            nzstat = nz.processor(item)
         else:
@@ -3138,6 +3162,13 @@ def job_management(write=False, job=None, last_run_completed=None, current_run=N
                     monitor_newstatus = ji['status']
                     monitor_nextrun = ji['next_run_timestamp']
 
+            monitors = {'weekly': mylar.SCHED_WEEKLY_LAST,
+                        'monitor': mylar.SCHED_MONITOR_LAST,
+                        'search': mylar.SCHED_SEARCH_LAST,
+                        'dbupdater': mylar.SCHED_DBUPDATE_LAST,
+                        'version': mylar.SCHED_VERSION_LAST,
+                        'rss': mylar.SCHED_RSS_LAST}
+
             #this is for initial startup
             for jb in mylar.SCHED.get_jobs():
                 #logger.fdebug('jb: %s' % jb)
@@ -3188,8 +3219,10 @@ def job_management(write=False, job=None, last_run_completed=None, current_run=N
                                    'status': newstatus})
 
         if not write:
-            #logger.info('jobresults: %s' % jobresults)
-            return jobresults
+            if len(jobresults) == 0:
+                return monitors
+            else:
+                return jobresults
         else:
             if job is None:
                 for x in jobresults:

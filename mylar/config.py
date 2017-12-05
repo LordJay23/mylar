@@ -197,7 +197,7 @@ _CONFIG_DEFINITIONS = OrderedDict({
     'SAB_PRIORITY': (str, 'SABnzbd', "Default"),
     'SAB_TO_MYLAR': (bool, 'SABnzbd', False),
     'SAB_DIRECTORY': (str, 'SABnzbd', None),
-    'SAB_CLIENT_POST_PROCESSING': (bool, 'SABnbzd', False),   #0/False: ComicRN.py, #1/True: Completed Download Handling
+    'SAB_CLIENT_POST_PROCESSING': (bool, 'SABnzbd', False),   #0/False: ComicRN.py, #1/True: Completed Download Handling
 
     'NZBGET_HOST': (str, 'NZBGet', None),
     'NZBGET_PORT': (str, 'NZBGet', None),
@@ -336,6 +336,15 @@ _CONFIG_DEFINITIONS = OrderedDict({
     'OPDS_PASSWORD': (str, 'OPDS', None),
     'OPDS_METAINFO': (bool, 'OPDS', False),
 
+    'TEST_VALUE': (bool, 'TEST', True),
+})
+
+_BAD_DEFINITIONS = OrderedDict({
+     #for those items that were in wrong sections previously, or sections that are no longer present...
+     #using this method, old values are able to be transfered to the new config items properly.
+     #keyname, section, oldkeyname
+    'SAB_CLIENT_POST_PROCESSING': ('SABnbzd', None),
+    'TEST_VALUE': ('TEST', 'TESTVALUE'),
 })
 
 class Config(object):
@@ -379,7 +388,27 @@ class Config(object):
                     x = 'None'
                 xv.append(x)
             value = self.check_setting(xv)
- 
+
+            for b, bv in _BAD_DEFINITIONS.iteritems():
+                try:
+                    if config.has_section(bv[0]) and any([b == k, bv[1] is None]):
+                        cvs = xv
+                        if bv[1] is None:
+                            ckey = k
+                        else:
+                            ckey = bv[1]
+                        corevalues = [ckey if x == 0 else x for x in cvs]
+                        corevalues = [bv[0] if x == corevalues.index(bv[0]) else x for x in cvs]
+                        value = self.check_setting(corevalues)
+                        if bv[1] is None:
+                            config.remove_option(bv[0], ckey.lower())
+                            config.remove_section(bv[0])
+                        else:
+                            config.remove_option(bv[0], bv[1].lower())
+                        break
+                except:
+                    pass
+
             if all([k != 'CONFIG_VERSION', k != 'MINIMAL_INI']):
                 try:
                     if v[0] == str and any([value == "", value is None, len(value) == 0, value == 'None']):
@@ -401,10 +430,16 @@ class Config(object):
 
                 setattr(self, k, value)
 
+                try:
+                    #make sure interpolation isn't being used, so we can just escape the % character
+                    if v[0] == str:
+                        value = value.replace('%', '%%')
+                except Exception as e:
+                    pass
+
                 #just to ensure defaults are properly set...
                 if any([value is None, value == 'None']):
                     value = v[0](v[2])
-
 
                 if all([self.MINIMAL_INI is True, str(value) != str(v[2])]) or self.MINIMAL_INI is False:
                     try:
@@ -515,7 +550,13 @@ class Config(object):
             elif definition_type == bool:
                 myval = {'status': True, 'value': config.getboolean(section, inikey)}
         except Exception:
-            myval = {'status': False, 'value': None}
+            if definition_type == str:
+                try:
+                    myval = {'status': True, 'value': config.get(section, inikey, raw=True)}
+                except (ConfigParser.NoSectionError, ConfigParser.NoOptionError):
+                    myval = {'status': False, 'value': None}
+            else:
+                myval = {'status': False, 'value': None}
         return myval
 
     def _define(self, name):
@@ -581,8 +622,12 @@ class Config(object):
                     if any([value is None, value == ""]):
                         value = definition_type(default)
                     if config.has_section(section) and (all([self.MINIMAL_INI is True, definition_type(value) != definition_type(default)]) or self.MINIMAL_INI is False):
+                        try:
+                            if definition_type == str:
+                                value = value.replace('%', '%%')
+                        except Exception as e:
+                            pass
                         config.set(section, ini_key, str(value))
-
                 else:
                     config.set(section, ini_key, str(self.MINIMAL_INI))
 
