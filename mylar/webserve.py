@@ -374,11 +374,14 @@ class WebInterface(object):
         raise cherrypy.HTTPRedirect("comicDetails?ComicID=%s" % comicid)
     addComic.exposed = True
 
-    def addbyid(self, comicid, calledby=None, imported=None, ogcname=None):
+    def addbyid(self, comicid, calledby=None, imported=None, ogcname=None, nothread=False):
         mismatch = "no"
         logger.info('Attempting to add directly by ComicVineID: ' + str(comicid))
         if comicid.startswith('4050-'): comicid = re.sub('4050-', '', comicid)
-        threading.Thread(target=importer.addComictoDB, args=[comicid, mismatch, None, imported, ogcname]).start()
+        if nothread is False:
+            threading.Thread(target=importer.addComictoDB, args=[comicid, mismatch, None, imported, ogcname]).start()
+        else:
+            return importer.addComictoDB(comicid, mismatch, None, imported, ogcname)
         if calledby == True or calledby == 'True':
            return
         elif calledby == 'web-import':
@@ -830,7 +833,7 @@ class WebInterface(object):
             logger.fdebug("Wiping NZBLOG in it's entirety. You should NOT be downloading while doing this or else you'll lose the log for the download.")
             myDB.action('DROP table nzblog')
             logger.fdebug("Deleted nzblog table.")
-            myDB.action('CREATE TABLE IF NOT EXISTS nzblog (IssueID TEXT, NZBName TEXT, SARC TEXT, PROVIDER TEXT, ID TEXT, AltNZBName TEXT)')
+            myDB.action('CREATE TABLE IF NOT EXISTS nzblog (IssueID TEXT, NZBName TEXT, SARC TEXT, PROVIDER TEXT, ID TEXT, AltNZBName TEXT, OneOff TEXT)')
             logger.fdebug("Re-created nzblog table.")
             raise cherrypy.HTTPRedirect("history")
         if IssueID:
@@ -3717,9 +3720,8 @@ class WebInterface(object):
     deleteimport.exposed = True
 
     def preSearchit(self, ComicName, comiclist=None, mimp=0, volume=None, displaycomic=None, comicid=None, dynamicname=None, displayline=None):
-        logger.info('here')
         if mylar.IMPORTLOCK:
-            logger.info('There is an import already running. Please wait for it to finish, and then you can resubmit this import.')
+            logger.info('[IMPORT] There is an import already running. Please wait for it to finish, and then you can resubmit this import.')
             return
         importlock = threading.Lock()
         myDB = db.DBConnection()
@@ -3739,8 +3741,8 @@ class WebInterface(object):
             #otherwise, comicID present by itself indicates a watch match that already exists and is done below this sequence.
             RemoveIDS = []
             for comicinfo in comiclist:
-                logger.info('Checking for any valid ComicID\'s already present within filenames.')
-                logger.info(comicinfo)
+                logger.fdebug('[IMPORT] Checking for any valid ComicID\'s already present within filenames.')
+                logger.fdebug('[IMPORT] %s:' % comicinfo)
                 if comicinfo['ComicID'] is None or comicinfo['ComicID'] == 'None':
                     continue
                 else:
@@ -3755,20 +3757,20 @@ class WebInterface(object):
                     import random
                     SRID = str(random.randint(100000, 999999))
 
-                    logger.info('Issues found with valid ComicID information for : ' + comicinfo['ComicName'] + ' [' + str(comicinfo['ComicID']) + ']')
+                    logger.info('[IMPORT] Issues found with valid ComicID information for : ' + comicinfo['ComicName'] + ' [' + str(comicinfo['ComicID']) + ']')
                     imported = {'ComicName':     comicinfo['ComicName'],
                                 'DynamicName':   comicinfo['DynamicName'],
                                 'Volume':        comicinfo['Volume'],
                                 'filelisting':   files,
                                 'srid':          SRID}
-                    self.addbyid(comicinfo['ComicID'], calledby=True, imported=imported, ogcname=comicinfo['ComicName'])
+                    self.addbyid(comicinfo['ComicID'], calledby=True, imported=imported, ogcname=comicinfo['ComicName'], nothread=True)
 
                     #status update.
                     ctrlVal = {"ComicID":     comicinfo['ComicID']}
                     newVal = {"Status":       'Imported',
                               "SRID":         SRID}
                     myDB.upsert("importresults", newVal, ctrlVal)
-                    logger.info('Successfully verified import sequence data for : ' + comicinfo['ComicName'] + '. Currently adding to your watchlist.')
+                    logger.info('[IMPORT] Successfully verified import sequence data for : ' + comicinfo['ComicName'] + '. Currently adding to your watchlist.')
                     RemoveIDS.append(comicinfo['ComicID'])
 
             #we need to remove these items from the comiclist now, so they don't get processed again
@@ -3781,26 +3783,26 @@ class WebInterface(object):
                 ComicName = cl['ComicName']
                 volume = cl['Volume']
                 DynamicName = cl['DynamicName']
-                logger.fdebug('comicname: ' + ComicName)
-                logger.fdebug('dyn: ' + DynamicName)
+                #logger.fdebug('comicname: ' + ComicName)
+                #logger.fdebug('dyn: ' + DynamicName)
 
                 if volume is None or volume == 'None':
                     comic_and_vol = ComicName
                 else:
                     comic_and_vol = ComicName + ' (' + str(volume) + ')'
-                logger.info('[' + comic_and_vol + '] Now preparing to import. First I need to determine the highest issue, and possible year(s) of the series.')
+                logger.info('[IMPORT][' + comic_and_vol + '] Now preparing to import. First I need to determine the highest issue, and possible year(s) of the series.')
                 if volume is None or volume == 'None':
-                    logger.info('[none] dynamicname: ' + DynamicName)
-                    logger.info('[none] volume: None')
+                    logger.fdebug('[IMPORT] [none] dynamicname: ' + DynamicName)
+                    logger.fdebug('[IMPORT] [none] volume: None')
 
                     results = myDB.select("SELECT * FROM importresults WHERE DynamicName=? AND Volume IS NULL AND Status='Not Imported'", [DynamicName])
                 else:
-                    logger.info('[!none] dynamicname: ' + DynamicName)
-                    logger.info('[!none] volume: ' + volume)
+                    logger.fdebug('[IMPORT] [!none] dynamicname: ' + DynamicName)
+                    logger.fdebug('[IMPORT] [!none] volume: ' + volume)
                     results = myDB.select("SELECT * FROM importresults WHERE DynamicName=? AND Volume=? AND Status='Not Imported'", [DynamicName,volume])
 
                 if not results:
-                    logger.info('I cannot find any results for the given series. I should remove this from the list.')
+                    logger.fdebug('[IMPORT] I cannot find any results for the given series. I should remove this from the list.')
                     continue
                 #if results > 0:
                 #    print ("There are " + str(results[7]) + " issues to import of " + str(ComicName))
@@ -3847,7 +3849,7 @@ class WebInterface(object):
                         if 'annual' in getiss.lower():
                             tmpiss = re.sub('[^0-9]','', getiss).strip()
                             if any([tmpiss.startswith('19'), tmpiss.startswith('20')]) and len(tmpiss) == 4:
-                                logger.fdebug('annual detected with no issue [' + getiss + ']. Skipping this entry for determining series length.')
+                                logger.fdebug('[IMPORT] annual detected with no issue [' + getiss + ']. Skipping this entry for determining series length.')
                                 continue
                         else:
                             if (result['ComicYear'] not in yearRANGE) or all([yearRANGE is None, yearRANGE == 'None']):
@@ -3873,22 +3875,20 @@ class WebInterface(object):
                      raise cherrypy.HTTPRedirect("importResults")
 
                 #figure out # of issues and the year range allowable
-                logger.info('yearTOP: ' + str(yearTOP))
-                logger.info('yearRANGE: ' + str(yearRANGE))
+                logger.fdebug('[IMPORT] yearTOP: ' + str(yearTOP))
+                logger.fdebug('[IMPORT] yearRANGE: ' + str(yearRANGE))
                 if starttheyear is None:
                     if all([yearTOP != None, yearTOP != 'None']):
                         if int(str(yearTOP)) > 0:
                             minni = helpers.issuedigits(minISSUE)
-                            logger.info(minni)
+                            #logger.info(minni)
                             if minni < 1 or minni > 999999999:
-                                logger.info('here')
                                 maxyear = int(str(yearTOP))
                             else:
-                                logger.info('there')
                                 maxyear = int(str(yearTOP)) - ( (minni/1000) / 12 )
                             if str(maxyear) not in yearRANGE:
-                                logger.info('maxyear:' + str(maxyear))
-                                logger.info('yeartop:' + str(yearTOP))
+                                #logger.info('maxyear:' + str(maxyear))
+                                #logger.info('yeartop:' + str(yearTOP))
                                 for i in range(maxyear, int(yearTOP),1):
                                     if not any(int(x) == int(i) for x in yearRANGE):
                                         yearRANGE.append(str(i))
@@ -3905,15 +3905,15 @@ class WebInterface(object):
                 #this needs to be reworked / refined ALOT more.
                 #minISSUE = highest issue #, startISSUE = lowest issue #
                 numissues = len(comicstoIMP)
-                logger.info('numissues: ' + str(numissues))
+                logger.fdebug('[IMPORT] number of issues: ' + str(numissues))
                 ogcname = ComicName
 
                 mode='series'
                 displaycomic = helpers.filesafe(ComicName)
                 displaycomic = re.sub('[\-]','', displaycomic).strip()
                 displaycomic = re.sub('\s+', ' ', displaycomic).strip()
-                logger.fdebug('displaycomic : ' + displaycomic)
-                logger.fdebug('comicname : ' + ComicName)
+                logger.fdebug('[IMPORT] displaycomic : ' + displaycomic)
+                logger.fdebug('[IMPORT] comicname : ' + ComicName)
                 searchterm = '"' + displaycomic + '"'
                 try:
                     if yearRANGE is None:
@@ -3921,13 +3921,13 @@ class WebInterface(object):
                     else:
                         sresults = mb.findComic(searchterm, mode, issue=numissues, limityear=yearRANGE) #ogcname, mode, issue=numissues, limityear=yearRANGE, explicit='all') #ComicName, mode, issue=numissues, limityear=yearRANGE)
                 except TypeError:
-                    logger.warn('Comicvine API limit has been reached, and/or the comicvine website is not responding. Aborting process at this time, try again in an ~ hr when the api limit is reset.')
+                    logger.warn('[IMPORT] Comicvine API limit has been reached, and/or the comicvine website is not responding. Aborting process at this time, try again in an ~ hr when the api limit is reset.')
                     break
 
                 type='comic'
 
                 #we now need to cycle through the results until we get a hit on both dynamicname AND year (~count of issues possibly).
-                logger.fdebug('[' + str(len(sresults)) + '] search results')
+                logger.fdebug('[IMPORT] [' + str(len(sresults)) + '] search results')
                 search_matches = []
                 for results in sresults:
                     rsn = filechecker.FileChecker()
@@ -3941,11 +3941,11 @@ class WebInterface(object):
                         totalissues = int(results['issues']) / 12
 
                     totalyear_range = int(result_year) + totalissues    #2000 + (101 / 12) 2000 +8.4 = 2008
-                    logger.fdebug('[' + str(totalyear_range) + '] Comparing: ' + re.sub('[\|\s]', '', DynamicName.lower()).strip() + ' - TO - ' + re.sub('[\|\s]', '', result_name.lower()).strip())
+                    logger.fdebug('[IMPORT] [' + str(totalyear_range) + '] Comparing: ' + re.sub('[\|\s]', '', DynamicName.lower()).strip() + ' - TO - ' + re.sub('[\|\s]', '', result_name.lower()).strip())
                     if any([str(totalyear_range) in results['seriesrange'], result_year in results['seriesrange']]):
-                        logger.info('LastIssueID: ' + str(results['lastissueid']))
+                        logger.fdebug('[IMPORT] LastIssueID: ' + str(results['lastissueid']))
                         if re.sub('[\|\s]', '', DynamicName.lower()).strip() ==  re.sub('[\|\s]', '', result_name.lower()).strip():
-                            logger.info('[IMPORT MATCH] ' + result_name + ' (' + str(result_comicid) + ')')
+                            logger.fdebug('[IMPORT MATCH] ' + result_name + ' (' + str(result_comicid) + ')')
                             search_matches.append({'comicid':       results['comicid'],
                                                    'series':        results['name'],
                                                    'dynamicseries': result_name,
@@ -3963,13 +3963,13 @@ class WebInterface(object):
 
                 if len(search_matches) == 1:
                     sr = search_matches[0]
-                    logger.info("There is only one result...automagik-mode enabled for " + sr['series'] + " :: " + str(sr['comicid']))
+                    logger.info("[IMPORT] There is only one result...automagik-mode enabled for " + sr['series'] + " :: " + str(sr['comicid']))
                     resultset = 1
                 else:
                     if len(search_matches) == 0 or len(search_matches) is None:
-                        logger.fdebug("no results, removing the year from the agenda and re-querying.")
+                        logger.fdebug("[IMPORT] no results, removing the year from the agenda and re-querying.")
                         sresults = mb.findComic(searchterm, mode, issue=numissues) #ComicName, mode, issue=numissues)
-                        logger.fdebug('[' + str(len(sresults)) + '] search results')
+                        logger.fdebug('[IMPORT] [' + str(len(sresults)) + '] search results')
                         for results in sresults:
                             rsn = filechecker.FileChecker()
                             rsn_run = rsn.dynamic_replace(results['name'])
@@ -3982,10 +3982,10 @@ class WebInterface(object):
                                 totalissues = int(results['issues']) / 12
 
                             totalyear_range = int(result_year) + totalissues    #2000 + (101 / 12) 2000 +8.4 = 2008
-                            logger.fdebug('[' + str(totalyear_range) + '] Comparing: ' + re.sub('[\|\s]', '', DynamicName.lower()).strip() + ' - TO - ' + re.sub('[\|\s]', '', result_name.lower()).strip())
+                            logger.fdebug('[IMPORT][' + str(totalyear_range) + '] Comparing: ' + re.sub('[\|\s]', '', DynamicName.lower()).strip() + ' - TO - ' + re.sub('[\|\s]', '', result_name.lower()).strip())
                             if any([str(totalyear_range) in results['seriesrange'], result_year in results['seriesrange']]):
                                 if re.sub('[\|\s]', '', DynamicName.lower()).strip() ==  re.sub('[\|\s]', '', result_name.lower()).strip():
-                                    logger.info('[IMPORT MATCH] ' + result_name + ' (' + str(result_comicid) + ')')
+                                    logger.fdebug('[IMPORT MATCH] ' + result_name + ' (' + str(result_comicid) + ')')
                                     search_matches.append({'comicid':       results['comicid'],
                                                            'series':        results['name'],
                                                            'dynamicseries': result_name,
@@ -4003,12 +4003,12 @@ class WebInterface(object):
 
                         if len(search_matches) == 1:
                             sr = search_matches[0]
-                            logger.info("There is only one result...automagik-mode enabled for " + sr['series'] + " :: " + str(sr['comicid']))
+                            logger.info("[IMPORT] There is only one result...automagik-mode enabled for " + sr['series'] + " :: " + str(sr['comicid']))
                             resultset = 1
                         else:
                             resultset = 0
                     else:
-                        logger.info('Returning results to Select option - there are ' + str(len(search_matches)) + ' possibilities, manual intervention required.')
+                        logger.info('[IMPORT] Returning results to Select option - there are ' + str(len(search_matches)) + ' possibilities, manual intervention required.')
                         resultset = 0
 
                 #generate random Search Results ID to allow for easier access for viewing logs / search results.
@@ -4019,65 +4019,81 @@ class WebInterface(object):
                     #link the SRID to the series that was just imported so that it can reference the search results when requested.
 
                 if volume is None or volume == 'None':
-                    ctrlVal = {"DynamicName": DynamicName,
-                               "ComicName":   ComicName}
+                    ctrlVal = {"DynamicName": DynamicName}
                 else:
                     ctrlVal = {"DynamicName": DynamicName,
-                               "ComicName":   ComicName,
                                "Volume":      volume}
 
                 if len(sresults) > 1 or len(search_matches) > 1:
                     newVal = {"SRID":         SRID,
-                              "Status":       'Manual Intervention'}
+                              "Status":       'Manual Intervention',
+                              "ComicName":    ComicName}
                 else:
                     newVal = {"SRID":         SRID,
-                              "Status":       'Importing'}
+                              "Status":       'Importing',
+                              "ComicName":    ComicName}
 
                 myDB.upsert("importresults", newVal, ctrlVal)
 
-                if len(search_matches) > 1:
-                    # if we matched on more than one series above, just save those results instead of the entire search result set.
-                    for sres in search_matches:
-                        cVal = {"SRID":        SRID,
-                                "comicid":     sres['comicid']}
-                        #should store ogcname in here somewhere to account for naming conversions above.
-                        nVal = {"Series":      ComicName,
-                                "results":     len(search_matches),
-                                "publisher":   sres['publisher'],
-                                "haveit":      sres['haveit'],
-                                "name":        sres['name'],
-                                "deck":        sres['deck'],
-                                "url":         sres['url'],
-                                "description":  sres['description'],
-                                "comicimage":  sres['comicimage'],
-                                "issues":      sres['issues'],
-                                "ogcname":     ogcname,
-                               "comicyear":   sres['comicyear']}
-                        myDB.upsert("searchresults", nVal, cVal)
+                if resultset == 0:
+                    if len(search_matches) > 1:
+                       # if we matched on more than one series above, just save those results instead of the entire search result set.
+                        for sres in search_matches:
+                            cVal = {"SRID":        SRID,
+                                    "comicid":     sres['comicid']}
+                            #should store ogcname in here somewhere to account for naming conversions above.
+                            nVal = {"Series":      ComicName,
+                                    "results":     len(search_matches),
+                                    "publisher":   sres['publisher'],
+                                    "haveit":      sres['haveit'],
+                                    "name":        sres['name'],
+                                    "deck":        sres['deck'],
+                                    "url":         sres['url'],
+                                    "description":  sres['description'],
+                                    "comicimage":  sres['comicimage'],
+                                    "issues":      sres['issues'],
+                                    "ogcname":     ogcname,
+                                    "comicyear":   sres['comicyear']}
+                            myDB.upsert("searchresults", nVal, cVal)
+                        logger.info('[IMPORT] There is more than one result that might be valid - normally this is due to the filename(s) not having enough information for me to use (ie. no volume label/year). Manual intervention is required.')
+                        #force the status here just in case
+                        newVal = {'SRID':     SRID,
+                                  'Status':   'Manual Intervention'}
+                        myDB.upsert("importresults", newVal, ctrlVal)
+
+                    elif len(sresults) > 1:
+                        # store the search results for series that returned more than one result for user to select later / when they want.
+                        # should probably assign some random numeric for an id to reference back at some point.
+                        for sres in sresults:
+                            cVal = {"SRID":        SRID,
+                                    "comicid":     sres['comicid']}
+                            #should store ogcname in here somewhere to account for naming conversions above.
+                            nVal = {"Series":      ComicName,
+                                    "results":     len(sresults),
+                                    "publisher":   sres['publisher'],
+                                    "haveit":      sres['haveit'],
+                                    "name":        sres['name'],
+                                    "deck":        sres['deck'],
+                                    "url":         sres['url'],
+                                    "description":  sres['description'],
+                                    "comicimage":  sres['comicimage'],
+                                    "issues":      sres['issues'],
+                                    "ogcname":     ogcname,
+                                    "comicyear":   sres['comicyear']}
+                            myDB.upsert("searchresults", nVal, cVal)
+                        logger.info('[IMPORT] There is more than one result that might be valid - normally this is due to the filename(s) not having enough information for me to use (ie. no volume label/year). Manual intervention is required.')
+                        #force the status here just in case
+                        newVal = {'SRID':     SRID,
+                                  'Status':   'Manual Intervention'}
+                        myDB.upsert("importresults", newVal, ctrlVal)
+                    else:
+                        logger.info('[IMPORT] Could not find any matching results against CV. Check the logs and perhaps rename the attempted file(s)')
+                        newVal = {'SRID':     SRID,
+                                  'Status':   'No Results'}
+                        myDB.upsert("importresults", newVal, ctrlVal)
 
                 else:
-                    # store the search results for series that returned more than one result for user to select later / when they want.
-                    # should probably assign some random numeric for an id to reference back at some point.
-                    for sres in sresults:
-                        cVal = {"SRID":        SRID,
-                                "comicid":     sres['comicid']}
-                        #should store ogcname in here somewhere to account for naming conversions above.
-                        nVal = {"Series":      ComicName,
-                                "results":     len(sresults),
-                                "publisher":   sres['publisher'],
-                                "haveit":      sres['haveit'],
-                                "name":        sres['name'],
-                                "deck":        sres['deck'],
-                                "url":         sres['url'],
-                                "description":  sres['description'],
-                                "comicimage":  sres['comicimage'],
-                                "issues":      sres['issues'],
-                                "ogcname":     ogcname,
-                               "comicyear":   sres['comicyear']}
-                        myDB.upsert("searchresults", nVal, cVal)
-
-                if resultset == 1:
-                    logger.info('now adding...')
+                    logger.info('[IMPORT] Now adding %s...' % ComicName)
 
                     if volume is None or volume == 'None':
                         results = myDB.select("SELECT * FROM importresults WHERE (WatchMatch is Null OR WatchMatch LIKE 'C%') AND DynamicName=? AND Volume IS NULL",[DynamicName])
@@ -4098,16 +4114,10 @@ class WebInterface(object):
                                 'filelisting':   files,
                                 'srid':          SRID}
 
-                    self.addbyid(sr['comicid'], calledby=True, imported=imported, ogcname=ogcname)  #imported=yes)
-                else:
-                    logger.info('[IMPORT] There is more than one result that might be valid - normally this is due to the filename(s) not having enough information for me to use (ie. no volume label/year). Manual intervention is required.')
-                    #force the status here just in case
-                    newVal = {'SRID':     SRID,
-                              'Status':   'Manual Intervention'}
-                    myDB.upsert("importresults", newVal, ctrlVal)
+                    self.addbyid(sr['comicid'], calledby=True, imported=imported, ogcname=ogcname, nothread=True)
 
         mylar.IMPORTLOCK = False
-        logger.info('[IMPORT] Initial Import complete (I might still be populating the series data).')
+        logger.info('[IMPORT] Import completed.')
 
     preSearchit.exposed = True
 
