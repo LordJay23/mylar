@@ -114,17 +114,20 @@ class FileChecker(object):
 
         if self.file:
             runresults = self.parseit(self.dir, self.file)
-            return {'parse_status':   runresults['parse_status'],
-                    'sub':            runresults['sub'],
-                    'comicfilename':  runresults['comicfilename'],
-                    'comiclocation':  runresults['comiclocation'],
-                    'series_name':    runresults['series_name'],
-                    'series_volume':  runresults['series_volume'],
-                    'alt_series':     runresults['alt_series'],
-                    'alt_issue':      runresults['alt_issue'],
-                    'issue_year':     runresults['issue_year'],
-                    'issue_number':   runresults['issue_number'],
-                    'scangroup':      runresults['scangroup']
+            return {'parse_status':        runresults['parse_status'],
+                    'sub':                 runresults['sub'],
+                    'comicfilename':       runresults['comicfilename'],
+                    'comiclocation':       runresults['comiclocation'],
+                    'series_name':         runresults['series_name'],
+                    'series_name_decoded': runresults['series_name_decoded'],
+                    'dynamic_name':        runresults['dynamic_name'],
+                    'series_volume':       runresults['series_volume'],
+                    'alt_series':          runresults['alt_series'],
+                    'alt_issue':           runresults['alt_issue'],
+                    'issue_year':          runresults['issue_year'],
+                    'issue_number':        runresults['issue_number'],
+                    'scangroup':           runresults['scangroup'],
+                    'reading_order':       runresults['reading_order']
                     }
         else:
             filelist = self.traverse_directories(self.dir)
@@ -136,7 +139,7 @@ class FileChecker(object):
                 if filename.startswith('.'):
                     continue
 
-                #logger.info('[FILENAME]: ' + filename)
+                logger.debug('[FILENAME]: ' + filename)
                 runresults = self.parseit(self.dir, filename, filedir)
                 if runresults:
                     try:
@@ -197,7 +200,7 @@ class FileChecker(object):
             watchmatch['comiclist'] = comiclist
 
         if len(self.failed_files) > 0:
-            logger.info('FAILED FILES: %s', self.failed_files)
+            logger.info('FAILED FILES: %s' % self.failed_files)
        
         return watchmatch
 
@@ -768,7 +771,7 @@ class FileChecker(object):
                     if sep_volume:
                         highest_series_pos = issue_number_position -2
                     else:
-                        if split_file[issue_number_position -1].lower() == 'annual':
+                        if split_file[issue_number_position -1].lower() == 'annual' or split_file[issue_number_position -1].lower() == 'special':
                             highest_series_pos = issue_number_position
                         else:
                             if volume_found['position'] < issue_number_position:
@@ -908,14 +911,22 @@ class FileChecker(object):
             #if the filename is unicoded, it won't match due to the unicode translation. Keep the unicode as well as the decoded.
             series_name_decoded= unicodedata.normalize('NFKD', helpers.conversion(series_name)).encode('ASCII', 'ignore')
             #check for annual in title(s) here.
-            if not self.justparse and mylar.CONFIG.ANNUALS_ON and 'annual' not in self.watchcomic.lower():
+            if not self.justparse and all([mylar.CONFIG.ANNUALS_ON, 'annual' not in self.watchcomic.lower(), 'special' not in self.watchcomic.lower()]):
                 if 'annual' in series_name.lower():
                     issue_number = 'Annual ' + str(issue_number)
                     series_name = re.sub('annual', '', series_name, flags=re.I).strip()
                     series_name_decoded = re.sub('annual', '', series_name_decoded, flags=re.I).strip()
+                elif 'special' in series_name.lower():
+                    issue_number = 'Special ' + str(issue_number)
+                    series_name = re.sub('special', '', series_name, flags=re.I).strip()
+                    series_name_decoded = re.sub('special', '', series_name_decoded, flags=re.I).strip()
 
             if issue_number is None or series_name is None:
                 logger.fdebug('Cannot parse the filename properly. I\'m going to make note of this filename so that my evil ruler can make it work.')
+                if series_name is not None:
+                    dreplace = self.dynamic_replace(series_name)['mod_seriesname']
+                else:
+                    dreplace = None
                 return {'parse_status':        'failure',
                         'sub':                 path_list,
                         'comicfilename':       filename,
@@ -924,12 +935,14 @@ class FileChecker(object):
                         'series_name_decoded': series_name_decoded,
                         'alt_series':          alt_series,
                         'alt_issue':           alt_issue,
+                        'dynamic_name':        dreplace,
                         'issue_number':        issue_number,
                         'justthedigits':       issue_number, #redundant but it's needed atm
                         'series_volume':       issue_volume,
                         'issue_year':          issue_year,
                         'annual_comicid':      None,
-                        'scangroup':           scangroup}
+                        'scangroup':           scangroup,
+                        'reading_order':       None}
 
             if self.justparse:
                 return {'parse_status':           'success',
@@ -1013,6 +1026,16 @@ class FileChecker(object):
                 if alt_series is not None and 'annual' in alt_series.lower():
                     nspace_altseriesname = re.sub('annual', '', nspace_altseriesname.lower()).strip()
                     nspace_altseriesname_decoded = re.sub('annual', '', nspace_altseriesname_decoded.lower()).strip()
+
+            if mylar.CONFIG.ANNUALS_ON and 'special' not in nspace_watchcomic.lower():
+                if 'special' in series_name.lower():
+                    justthedigits = 'Special ' + series_info['issue_number']
+                    nspace_seriesname = re.sub('special', '', nspace_seriesname.lower()).strip()
+                    nspace_seriesname_decoded = re.sub('special', '', nspace_seriesname_decoded.lower()).strip()
+                if alt_series is not None and 'special' in alt_series.lower():
+                    nspace_altseriesname = re.sub('special', '', nspace_altseriesname.lower()).strip()
+                    nspace_altseriesname_decoded = re.sub('special', '', nspace_altseriesname_decoded.lower()).strip()
+
             seriesalt = False
 
             if nspace_altseriesname is not None:
@@ -1020,7 +1043,7 @@ class FileChecker(object):
                     seriesalt = True
 
             if any([seriesalt is True, re.sub('\|','', nspace_seriesname.lower()).strip() == re.sub('\|', '', nspace_watchcomic.lower()).strip(), re.sub('\|','', nspace_seriesname_decoded.lower()).strip() == re.sub('\|', '', nspace_watchname_decoded.lower()).strip()]) or any(re.sub('[\|\s]','', x.lower()).strip() == re.sub('[\|\s]','', nspace_seriesname.lower()).strip() for x in self.AS_Alt):
-                logger.fdebug('[MATCH: ' + series_info['series_name'] + '] ' + filename)
+                #logger.fdebug('[MATCH: ' + series_info['series_name'] + '] ' + filename)
                 enable_annual = False
                 annual_comicid = None
                 if any(re.sub('[\|\s]','', x.lower()).strip() == re.sub('[\|\s]','', nspace_seriesname.lower()).strip() for x in self.AS_Alt):
@@ -1031,9 +1054,9 @@ class FileChecker(object):
                     if len(loopchk) > 0 and loopchk[0] != '':
                         if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
                             logger.fdebug('[FILECHECKER] This should be an alternate: ' + str(loopchk))
-                        if 'annual' in series_name.lower():
+                        if any(['annual' in series_name.lower(), 'special' in series_name.lower()]):
                             if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
-                                logger.fdebug('[FILECHECKER] Annual detected - proceeding')
+                                logger.fdebug('[FILECHECKER] Annual/Special detected - proceeding')
                             enable_annual = True
 
                     else:
@@ -1043,16 +1066,21 @@ class FileChecker(object):
                     #if the names match up, and enable annuals isn't turned on - keep it all together.
                     if re.sub('\|', '', nspace_watchcomic.lower()).strip() == re.sub('\|', '', nspace_seriesname.lower()).strip() and enable_annual == False:
                         loopchk.append(nspace_watchcomic)
-                        if 'annual' in nspace_seriesname.lower():
+                        if any(['annual' in nspace_seriesname.lower(), 'special' in nspace_seriesname.lower()]):
                             if 'biannual' in nspace_seriesname.lower():
                                 if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
                                     logger.fdebug('[FILECHECKER] BiAnnual detected - wouldn\'t Deadpool be proud?')
                                 nspace_seriesname = re.sub('biannual', '', nspace_seriesname).strip()
                                 enable_annual = True
-                            else:
+                            elif 'annual' in nspace_seriesname.lower():
                                 if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
                                     logger.fdebug('[FILECHECKER] Annual detected - proceeding cautiously.')
                                 nspace_seriesname = re.sub('annual', '', nspace_seriesname).strip()
+                                enable_annual = False
+                            elif 'special' in nspace_seriesname.lower():
+                                if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
+                                    logger.fdebug('[FILECHECKER] Special detected - proceeding cautiously.')
+                                nspace_seriesname = re.sub('special', '', nspace_seriesname).strip()
                                 enable_annual = False
 
                     if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
@@ -1084,10 +1112,12 @@ class FileChecker(object):
                            if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
                                logger.fdebug('bi annual detected')
                            justthedigits = 'BiAnnual ' + justthedigits
-                       else:
+                       elif 'annual' in nspace_watchcomic.lower():
                            if mylar.CONFIG.FOLDER_SCAN_LOG_VERBOSE:
                                logger.fdebug('annual detected')
                            justthedigits = 'Annual ' + justthedigits
+                       elif 'special' in nspace_watchcomic.lower():
+                           justthedigits = 'Special ' + justthedigits
 
                 return {'process_status': 'match',
                         'sub':             series_info['sub'],
@@ -1105,7 +1135,7 @@ class FileChecker(object):
                         'scangroup':       series_info['scangroup']}
 
             else:
-                logger.info('[NO MATCH] ' + filename + ' [WATCHLIST:' + self.watchcomic + ']')
+                #logger.fdebug('[NO MATCH] ' + filename + ' [WATCHLIST:' + self.watchcomic + ']')
                 return {'process_status': 'fail',
                         'comicfilename':  filename,
                         'sub':            series_info['sub'],
@@ -1391,6 +1421,10 @@ def setperms(path, dir=False):
                     permission = int(mylar.CONFIG.CHMOD_DIR, 8)
                     os.chmod(path, permission)
                     os.chown(path, chowner, chgroup)
+                elif os.path.isfile(path):
+                    permission = int(mylar.CONFIG.CHMOD_FILE, 8)
+                    os.chown(path, chowner, chgroup)
+                    os.chmod(path, permission)   
                 else:
                     for root, dirs, files in os.walk(path):
                         for momo in dirs:
@@ -1404,6 +1438,9 @@ def setperms(path, dir=False):
 
                 logger.fdebug('Successfully changed ownership and permissions [' + str(mylar.CONFIG.CHOWNER) + ':' + str(mylar.CONFIG.CHGROUP) + '] / [' + str(mylar.CONFIG.CHMOD_DIR) + ' / ' + str(mylar.CONFIG.CHMOD_FILE) + ']')
 
+            elif os.path.isfile(path):
+                    permission = int(mylar.CONFIG.CHMOD_FILE, 8)
+                    os.chmod(path, permission)
             else:
                 for root, dirs, files in os.walk(path):
                     for momo in dirs:

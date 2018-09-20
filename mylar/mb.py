@@ -54,7 +54,7 @@ def pullsearch(comicapi, comicquery, offset, type):
            filterline+= ',name:%s' % x
        cnt+=1
 
-    PULLURL = mylar.CVURL + str(type) + 's?api_key=' + str(comicapi) + '&filter=name:' + filterline + '&field_list=id,name,start_year,site_detail_url,count_of_issues,image,publisher,deck,description,first_issue,last_issue&format=xml&offset=' + str(offset) # 2012/22/02 - CVAPI flipped back to offset instead of page
+    PULLURL = mylar.CVURL + str(type) + 's?api_key=' + str(comicapi) + '&filter=name:' + filterline + '&field_list=id,name,start_year,site_detail_url,count_of_issues,image,publisher,deck,description,first_issue,last_issue&format=xml&sort=date_last_updated:desc&offset=' + str(offset) # 2012/22/02 - CVAPI flipped back to offset instead of page
 
     #all these imports are standard on most modern python implementations
     #logger.info('MB.PULLURL:' + PULLURL)
@@ -74,7 +74,15 @@ def pullsearch(comicapi, comicquery, offset, type):
         logger.warn('Error fetching data from ComicVine: %s' % (e))
         return
 
-    dom = parseString(r.content) #(data)
+    try:
+        dom = parseString(r.content) #(data)
+    except ExpatError:
+        if u'<title>Abnormal Traffic Detected' in r.content:
+            logger.error('ComicVine has banned this server\'s IP address because it exceeded the API rate limit.')
+        else:
+            logger.warn('[WARNING] ComicVine is not responding correctly at the moment. This is usually due to some problems on their end. If you re-try things again in a few moments, it might work properly.')
+        return
+
     return dom
 
 def findComic(name, mode, issue, limityear=None, type=None):
@@ -93,13 +101,25 @@ def findComic(name, mode, issue, limityear=None, type=None):
             tehstart = m.start()
             tehend = m.end()
             if any([x == 'the', x == 'and']):
+                if len(name) == tehend:
+                    tehend =-1
                 if not all([tehstart == 0, name[tehend] == ' ']) or not all([tehstart != 0, name[tehstart-1] == ' ', name[tehend] == ' ']):
                     continue
             else:
                 name = name.replace(x, ' ', cnt)
 
+    originalname = name
+    if '+' in name:
+       name = re.sub('\+', 'PLUS', name)
+
     pattern = re.compile(ur'\w+', re.UNICODE)
     name = pattern.findall(name)
+
+    if '+' in originalname:
+        y = []
+        for x in name:
+            y.append(re.sub("PLUS", "%2B", x))
+        name = y
 
     if limityear is None: limityear = 'None'
 
@@ -427,7 +447,14 @@ def storyarcinfo(xmlid):
 #        return
 #    arcdata = file.read()
 #    file.close()
-    arcdom = parseString(r.content) #(arcdata)
+    try:
+        arcdom = parseString(r.content) #(arcdata)
+    except ExpatError:
+        if u'<title>Abnormal Traffic Detected' in r.content:
+            logger.error("ComicVine has banned this server's IP address because it exceeded the API rate limit.")
+        else:
+            logger.warn('While parsing data from ComicVine, got exception: %s for data: %s' % (str(e), r.content))
+        return
 
     try:
         logger.fdebug('story_arc ascension')
@@ -470,13 +497,13 @@ def storyarcinfo(xmlid):
         if firstid is not None:
             firstdom = cv.pulldetails(comicid=None, type='firstissue', issueid=firstid)
             logger.fdebug('success')
-            arcyear = cv.GetFirstIssue(firstid,firstdom)
+            arcyear = cv.Getissue(firstid,firstdom,'firstissue')
     except:
         logger.fdebug('Unable to retrieve first issue details. Not caclulating at this time.')
 
-    if (arcdom.getElementsByTagName('image')[0].childNodes[0].nodeValue) is None:
+    try:
         xmlimage = arcdom.getElementsByTagName('super_url')[0].firstChild.wholeText
-    else:
+    except:
         xmlimage = "cache/blankcover.jpg"
 
     try:

@@ -43,8 +43,9 @@ def movefiles(comicid, comlocation, imported):
             logger.info("moving " + srcimp + " ... to " + dstimp)
             try:
                 shutil.move(srcimp, dstimp)
-                files_moved.append({'srid':     imported['srid'],
-                                    'filename': impr['comicfilename']})
+                files_moved.append({'srid':       imported['srid'],
+                                    'filename':   impr['comicfilename'],
+                                    'import_id':  impr['import_id']})
             except (OSError, IOError):
                 logger.error("Failed to move files - check directories and manually re-run.")
 
@@ -76,8 +77,9 @@ def archivefiles(comicid, comlocation, imported):
     # if move files isn't enabled, let's set all found comics to Archive status :)
     try:
         imported = ast.literal_eval(imported)
-    except ValueError:
-        pass
+    except Exception as e:
+        logger.warn('[%s] Error encountered converting import data' % e)
+
     ComicName = imported['ComicName']
     impres = imported['filelisting']
 
