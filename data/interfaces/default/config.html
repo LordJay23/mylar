@@ -194,6 +194,41 @@
                                     <input type="checkbox" name="syno_fix" value="1" ${config['syno_fix']} /> <label>Synology Fix</label>
                                     <br/><small>*Use this if experiencing parsing problems*</small>
                                  </div>
+                        <fieldset>
+                             <legend>Mylar Theme</legend>
+                             <div class="row">
+                                 <label>Mylar Theme</label>
+                                 <select name="interface">
+                                  %for x in config['interface_list']:
+                                         <%
+                                                if config['interface'] == x:
+                                                    outputselect = 'selected="selected"'
+                                                else:
+                                                    outputselect = ''
+                                          %>
+                                          <option value="${x}" ${outputselect}>${x}</option>
+                                  %endfor
+                                 </select>
+                            </div>
+                             <div class="row">
+                                 <label>Bootswatch Theme</label>
+                                 <select name="Bootswatch_theme">
+                                  %for x in config['bootswatch_themelist']:
+                                         <%
+                                                if config['bootswatch_theme'] == x:
+                                                    outputselect = 'selected="selected"'
+                                                else:
+                                                    outputselect = ''
+                                          %>
+                                          <option value="${x}" ${outputselect}>${x}</option>
+                                  %endfor
+                                 </select>
+                                 <br/><small>*Only applicable if Bootstrap is selected*</small>
+                            </div>
+                        </fieldset>
+
+
+
 <!--
                                  <div class="row checkbox">
                                     <input type="checkbox" name="auto_update" value="1" ${config['auto_update']} /> <label>Automatic Updates</label>
@@ -1236,22 +1271,7 @@
                                         </div>
 		        	</fieldset>
 					<fieldset>
-						<legend>Interface</legend>
-						<div class="row">
-							<label>Interface</label> 
-							<select name="interface"><h3>
-							%for interface in config['interface_list']:
-								<%
-									if interface == mylar.CONFIG.INTERFACE:
-										selected = 'selected="selected"'
-									else:
-										selected = ''
-								%>
-								<option value="${interface}" ${selected}>${interface}</option>
-							%endfor
-							</select>
-							
-						</div>
+						<legend>Logs</legend>
 						<div class="row">
 							<label>Log Directory:</label>
 							<input type="text" name="log_dir" value="${config['log_dir']}" size="50">
