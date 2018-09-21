@@ -1,0 +1,193 @@
+<%inherit file="base.html"/>
+<%!
+    import mylar
+%>
+<%def name="headerIncludes()">
+    <div id="subhead_container" class="row">
+        <div id="subhead_menu"  class="col-xs-12 col-md-8">
+            <!-- <a href="storyarc_main" class="btn btn-sm btn-primary" id="refresh"><i class="fa fa-superpowers"></i> Story Arcs</a> -->
+            <a class="btn btn-sm btn-primary" id="refresh" onclick="doAjaxCall('refreshSeries?ComicID=${comic['ComicID']}', $(this),'table')" href="#" data-success="${comic['ComicName']} is being refreshed"><i class="fa fa-refresh"></i> Refresh Comic</a>
+            <a class="btn btn-sm btn-warning" id="menu_link_delete" href="#"><i class="fa fa-trash"></i> Delete Comic</a>
+               <div id="dialog" title="Delete Series Confirmation" style="display:none" class="configtable">
+                  <form action="deleteSeries" method="GET" style="vertical-align: middle; text-align: center">
+                      </br><input type="submit" value="Delete Series">
+                      <div class="row checkbox left clearfix">
+                          </br>
+                          <input type="checkbox" style="vertical-align: middle; margin: 3px; margin-top: -1px;" name="delete_dir" id="deleteCheck" value="1" ${comicConfig['delete_dir']} /><label>Remove directory when deleting Series?</label>
+                      </div>
+                      <input type="hidden" name="ComicID" value=${comic['ComicID']}>
+                  </form>
+               </div>
+            %if mylar.CONFIG.RENAME_FILES:
+                <a class="btn btn-sm btn-primary" id="menu_link_refresh" onclick="doAjaxCall('manualRename?comicid=${comic['ComicID']}', $(this),'table')" data-success="Renaming files.">Rename Files</a>
+            %endif
+                <a class="btn btn-sm btn-primary" id="menu_link_refresh" onclick="doAjaxCall('forceRescan?ComicID=${comic['ComicID']}', $(this),true);return true;"  data-success="${comic['ComicName']} is being rescanned"><i class="fa fa-refresh"></i> Recheck Files</a>
+            %if mylar.CONFIG.ENABLE_META:
+                <a class="btn btn-sm btn-primary" id="menu_link_refresh" onclick="doAjaxCall('group_metatag?ComicID=${comic['ComicID']}&dirName=${comic['ComicLocation'] |u}', $(this),'table')" data-success="(re)tagging every issue present for '${comic['ComicName']}'"><i class="fa fa-vcard"></i> Manual MetaTagging</a>
+            %endif
+            %if comic['Status'] == 'Paused':
+                    <a class="btn btn-sm btn-primary" id="menu_link_resume" href="#" onclick="doAjaxCall('resumeSeries?ComicID=${comic['ComicID']}',$(this),true)" data-success="${comic['ComicName']} resumed"><i class="fa fa-play"></i> Resume Comic</a>
+            %else:
+                    <a class="btn btn-sm btn-primary" id="menu_link_pauze" href="#" onclick="doAjaxCall('pauseSeries?ComicID=${comic['ComicID']}',$(this),true)" data-success="${comic['ComicName']} paused"><i class="fa fa-pause"></i> Pause Comic</a>
+            %endif
+            %if annuals:
+                    <a class="btn btn-sm btn-warning" id="menu_link_delete" href="annualDelete?comicid=${comic['ComicID']}"><i class="fa fa-trash"></i> Delete Annuals</a>
+            %endif
+
+            <a class="btn btn-sm btn-primary" id="menu_link_addalltoRL" href="#" class="menu_link_addalltoRL"><i class="fa fa-plus"></i> Add All to Readinglist</a>
+
+        </div>
+        <div class="clearfix visible-xs"><hr/></div>
+        <div class="col-xs-12 col-md-4">
+        </div>
+    </div>
+</%def>
+<%def name="body()">
+<div id="main" class="main container">
+    <div class="row display-flex">
+        <div class="col-xs-10">
+            		<h1>
+                        %if comic['Status'] == 'Loading':
+                                <img src="interfaces/default/images/loader_black.gif" alt="loading" style="float:left; margin-right: 5px;"/>
+                        %endif
+                        <a href="${comic['DetailURL']}" target="_blank">${comic['ComicName']} (${comic['ComicYear']})</a>
+                        %if comic['Status'] == 'Loading':
+                            <h3><i>(Comic information is currently being loaded)</i></h3>
+                        %endif
+                </h1>
+        </div>
+        <div class="col-xs-2 Aligner">
+            % if 'Previous' in series:
+            <a class="btn btn-sm btn-primary" href="comicDetails?ComicID=${series['Previous']}"><i class="fa fa-arrow-left"></i> </a>
+            % endif
+            % if 'Next' in series:
+                &nbsp;<a class="btn btn-sm btn-primary" href="comicDetails?ComicID=${series['Next']}"><i class="fa fa-arrow-right"></i> </a>
+            % endif
+        </div>
+    </div>
+</div>
+<div id="comictabs" class="container">
+    <ul class="nav nav-tabs">
+        <li class="active">
+            <a href="#details" data-toggle="tab">Comic Details</a>
+        </li>
+        <li>
+            <a href="#edit" data-toggle="tab">Edit Settings</a>
+        </li>
+    </ul>
+    <div class="tab-content">
+        <div class="tab-pane active" id="details">
+            <div class="row display-flex">
+                <div class="col-md-4 col-xs-12">
+                    <img src="${comic['ComicImage']}" alt="" height="400" width="263" />
+                </div>
+                <div class="col-md-6 col-xs-12">
+                    <div>
+                    <label><big>Publication Date: </big><norm>${comic['ComicPublished']}</norm></label>
+                    </div>
+                    <div>
+                    <label><big>Publisher: </big><norm>${comic['ComicPublisher']}</norm></label>
+                    </div>
+                    <div>
+                    <label><big>Status: </big><norm>${comic['Status']}</norm></label>
+                    </div>
+                    <%
+                      if comic['Type'] == 'None' or comic['Type'] is None or comic['Type'] == 'Print':
+                          comictype = 'Print'
+                      else:
+                          comictype = 'Digital'
+                    %>
+                    <div>
+                        <label><big>Edition: </big><norm>${comictype}</norm></label>
+                    </div>
+                    <div>
+                        <label><big>Last Updated: </big>
+                            %if comic['LastUpdated'] is None:
+                            <norm>Never</norm>
+                            %else:
+                            <norm>${comic['LastUpdated']}</norm>
+                            %endif
+                        </label>
+                    </div>
+                    <div>
+                        <label><big>Issues in Series: </big><norm>${comic['Total']} issues</norm></label>
+                    </div>
+                    <div>
+                    %if mylar.CONFIG.MULTIPLE_DEST_DIRS is not None and mylar.CONFIG.MULTIPLE_DEST_DIRS != 'None':
+                       <%
+                           try:
+                               archive_path = os.path.join(mylar.CONFIG.MULTIPLE_DEST_DIRS, os.path.basename(comic['ComicLocation']))
+                           except:
+                               archive_path = 'None'
+                        %>
+                        %if os.path.exists(archive_path) and archive_path != comic['ComicLocation']:
+                            <label><big>Directories:</big></label><br/>
+                            <p class="tab"><norm>Primary: ${comic['ComicLocation']}</norm><br/>
+                            <norm>Secondary: ${archive_path}</norm></label></p>
+                        %else:
+                            <label><big>Directory:</big><br/>
+                            <norm>${comic['ComicLocation']}</norm></label>
+                        %endif
+                    %else:
+                       <label><big>Directory</big><br/><norm>${comic['ComicLocation']}</norm></label>
+                    %endif
+                    </div>
+
+                </div>
+                <div class="col-md-2 col-xs-12">
+                       %if comic['ComicPublisher'] == 'DC Comics':
+                        <img src="interfaces/default/images/publisherlogos/logo-dccomics.png" align="right" alt="DC" height="50" width="50" />
+                       %elif comic['ComicPublisher'] == 'Marvel':
+                        <img src="interfaces/default/images/publisherlogos/logo-marvel.jpg" align="right" alt="Marvel" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Image':
+                        <img src="interfaces/default/images/publisherlogos/logo-imagecomics.png" align="right" alt="Image" height="100" width="50" />
+                       %elif comic['ComicPublisher'] == 'Dark Horse Comics' or comic['ComicPublisher'] == 'Dark Horse':
+                        <img src="interfaces/default/images/publisherlogos/logo-darkhorse.png" align="right" alt="Darkhorse" height="100" width="75" />
+                       %elif comic['ComicPublisher'] == 'IDW Publishing':
+                        <img src="interfaces/default/images/publisherlogos/logo-idwpublish.png" align="right" alt="IDW" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Icon':
+                        <img src="interfaces/default/images/publisherlogos/logo-iconcomics.png" align="right" alt="Icon" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Red5':
+                        <img src="interfaces/default/images/publisherlogos/logo-red5comics.png" align="right" alt="Red5" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Vertigo':
+                        <img src="interfaces/default/images/publisherlogos/logo-vertigo.jpg" align="right" alt="Vertigo" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'ShadowLine':
+                        <img src="interfaces/default/images/publisherlogos/logo-shadowline.png" align="right" alt="Shadowline" height="75" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Archie Comics':
+                        <img src="interfaces/default/images/publisherlogos/logo-archiecomics.jpg" align="right" alt="Archie" height="75" width="75"/>
+                       %elif comic['ComicPublisher'] == 'Oni Press':
+                        <img src="interfaces/default/images/publisherlogos/logo-onipress.png" align="right" alt="Oni Press" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Tokyopop':
+                        <img src="interfaces/default/images/publisherlogos/logo-tokyopop.jpg" align="right" alt="Tokyopop" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Midtown Comics':
+                        <img src="interfaces/default/images/publisherlogos/logo-midtowncomics.jpg" align="right" alt="Midtown" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Boom! Studios':
+                        <img src="interfaces/default/images/publisherlogos/logo-boom.jpg" align="right" alt="Boom!" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Skybound':
+                        <img src="interfaces/default/images/publisherlogos/logo-skybound.jpg" align="right" alt="Skybound" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Vertigo':
+                        <img src="interfaces/default/images/publisherlogos/logo-dynamite.jpg" align="right" alt="Dynamite" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Top Cow':
+                        <img src="interfaces/default/images/publisherlogos/logo-topcow.gif" align="right" alt="Top Cow" height="75" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Dynamite Entertainment':
+                        <img src="interfaces/default/images/publisherlogos/logo-dynamite.png" align="right" alt="Dynamite" height="50" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Cartoon Books':
+                        <img src="interfaces/default/images/publisherlogos/logo-cartoonbooks.jpg" align="right" alt="Cartoon Books" height="75" width="90"/>
+                       %elif comic['ComicPublisher'] == 'Valiant':
+                        <img src="interfaces/default/images/publisherlogos/logo-valiant.png" align="right" alt="Valiant" height="100" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Action Lab':
+                        <img src="interfaces/default/images/publisherlogos/logo-actionlabs.png" align="right" alt="Action Lab" height="100" width="100"/>
+                       %elif comic['ComicPublisher'] == 'Zenescope Entertainment':
+                        <img src="interfaces/default/images/publisherlogos/logo-zenescope.png" align="right" alt="Zenescope" height="100" width="160"/>
+                       %endif
+                </div>
+            </div>
+        </div>
+        <div class="tab-pane" id="edit">
+
+        </div>
+    </div>
+</div>
+</%def>
+<%def name="javascriptIncludes()">
+</%def>
