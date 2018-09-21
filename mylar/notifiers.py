@@ -205,16 +205,27 @@ class NMA:
 # No extra care has been put into API friendliness at the moment (read: https://pushover.net/api#friendly)
 class PUSHOVER:
 
-    def __init__(self, test_apikey=None, test_userkey=None):
-        self.PUSHOVER_URL = 'https://api.pushover.net/1/messages.json'
+    def __init__(self, test_apikey=None, test_userkey=None, test_device=None):
+        if all([test_apikey is None, test_userkey is None, test_device is None]):
+            self.PUSHOVER_URL = 'https://api.pushover.net/1/messages.json'
+            self.test = False
+        else:
+            self.PUSHOVER_URL = 'https://api.pushover.net/1/users/validate.json'
+            self.test = True
         self.enabled = mylar.CONFIG.PUSHOVER_ENABLED
         if test_apikey is None:
             if mylar.CONFIG.PUSHOVER_APIKEY is None or mylar.CONFIG.PUSHOVER_APIKEY == 'None':
-                self.apikey = 'a1KZ1L7d8JKdrtHcUR6eFoW2XGBmwG'
+                logger.warn('No Pushover Apikey is present. Fix it')
+                return False
             else:
                 self.apikey = mylar.CONFIG.PUSHOVER_APIKEY
         else:
             self.apikey = test_apikey
+
+        if test_device is None:
+            self.device = mylar.CONFIG.PUSHOVER_DEVICE
+        else:
+            self.device = test_device
 
         if test_userkey is None:
             self.userkey = mylar.CONFIG.PUSHOVER_USERKEY
@@ -227,8 +238,7 @@ class PUSHOVER:
         self._session.headers = {'Content-type': "application/x-www-form-urlencoded"}
 
     def notify(self, event, message=None, snatched_nzb=None, prov=None, sent_to=None, module=None):
-        if not mylar.CONFIG.PUSHOVER_ENABLED:
-            return
+
         if module is None:
             module = ''
         module += '[NOTIFIER]'
@@ -244,20 +254,44 @@ class PUSHOVER:
                 'title': event,
                 'priority': mylar.CONFIG.PUSHOVER_PRIORITY}
 
+        if all([self.device is not None, self.device != 'None']):
+            data.update({'device': self.device})
+
         r = self._session.post(self.PUSHOVER_URL, data=data, verify=True)
 
         if r.status_code == 200:
-            logger.info(module + ' PushOver notifications sent.')
-            return True
+            try:
+                response = r.json()
+                if 'devices' in response and self.test is True:
+                    logger.fdebug('%s Available devices: %s' % (module, response))
+                    if any([self.device is None, self.device == 'None']):
+                        self.device = 'all available devices'
+
+                    r = self._session.post('https://api.pushover.net/1/messages.json', data=data, verify=True)
+                    if r.status_code == 200:
+                        logger.info('%s PushOver notifications sent to %s.' % (module, self.device))
+                    elif r.status_code >=400 and r.status_code < 500:
+                        logger.error('%s PushOver request failed to %s: %s' % (module, self.device, r.content))
+                        return False
+                    else:
+                        logger.error('%s PushOver notification failed serverside.' % module)
+                        return False
+                else:
+                    logger.info('%s PushOver notifications sent.' % module)
+            except Exception as e:
+                logger.warn('%s[ERROR] - %s' % (module, e))
+                return False
+            else:
+                return True
         elif r.status_code >= 400 and r.status_code < 500:
-            logger.error(module + ' PushOver request failed: %s' % r.content)
+            logger.error('%s PushOver request failed: %s' % (module, r.content))
             return False
         else:
-            logger.error(module + ' PushOver notification failed serverside.')
+            logger.error('%s PushOver notification failed serverside.' % module)
             return False
 
     def test_notify(self):
-        return self.notify(message='Release the Ninjas!',event='Test Message')
+        return self.notify(event='Test Message', message='Release the Ninjas!')
 
 class BOXCAR:
 
@@ -423,12 +457,9 @@ class TELEGRAM:
         else:
             self.token = test_token
 
-    def notify(self, message, status):
-        if not mylar.CONFIG.TELEGRAM_ENABLED:
-            return
-
+    def notify(self, message):
         # Construct message
-        payload = {'chat_id': self.userid, 'text': status + ': ' + message}
+        payload = {'chat_id': self.userid, 'text': message}
 
         # Send message to user using Telegram's Bot API
         try:
@@ -446,25 +477,34 @@ class TELEGRAM:
         return sent_successfuly
 
     def test_notify(self):
-        return self.notify('Test Message', 'Release the Ninjas!')
+        return self.notify('Test Message: Release the Ninjas!')
 
 class SLACK:
     def __init__(self, test_webhook_url=None):
         self.webhook_url = mylar.CONFIG.SLACK_WEBHOOK_URL if test_webhook_url is None else test_webhook_url
-        
-    def notify(self, text, attachment_text, module=None):
+
+    def notify(self, text, attachment_text, snatched_nzb=None, prov=None, sent_to=None, module=None):
         if module is None:
             module = ''
         module += '[NOTIFIER]'
-        
+
+        if all([sent_to is not None, prov is not None]):
+            attachment_text += ' from %s and sent to %s' % (prov, sent_to)
+        elif sent_to is None:
+            attachment_text += ' from %s' % prov
+        else:
+            pass
+
         payload = {
-            "text": text,
-            "attachments": [
-                {
-                    "color": "#36a64f",
-                    "text": attachment_text
-                }
-            ]
+#            "text": text,
+#            "attachments": [
+#                {
+#                    "color": "#36a64f",
+#                    "text": attachment_text
+#                }
+#            ]
+# FIX: #1861 move notif from attachment to msg body - bbq
+            "text": attachment_text
         }
 
         try:
@@ -480,6 +520,6 @@ class SLACK:
 
         logger.info(module + u"Slack notifications sent.")
         return sent_successfuly
-        
+
     def test_notify(self):
         return self.notify('Test Message', 'Release the Ninjas!')

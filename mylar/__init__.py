@@ -22,6 +22,7 @@ import os, sys, subprocess
 
 import threading
 import datetime
+from datetime import timedelta
 import webbrowser
 import sqlite3
 import json
@@ -40,9 +41,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 import cherrypy
 
 from mylar import logger, versioncheckit, rsscheckit, searchit, weeklypullit, PostProcessor, updater, helpers
-
-from mylar import versioncheck, logger
-
 import mylar.config
 
 #these are the globals that are runtime-based (ie. not config-valued at all)
@@ -50,19 +48,23 @@ import mylar.config
 PROG_DIR = None
 DATA_DIR = None
 FULL_PATH = None
+MAINTENANCE = False
 LOG_DIR = None
 LOGTYPE = 'log'
+LOG_LANG = 'en'
+LOG_CHARSET = 'UTF-8'
+LOG_LEVEL = 1
+LOGLIST = []
 ARGS = None
 SIGNAL = None
 SYS_ENCODING = None
 OS_DETECT = platform.system()
 USER_AGENT = None
-VERBOSE = False
+#VERBOSE = False
 DAEMON = False
 PIDFILE= None
 CREATEPID = False
 QUIET=False
-LOG_LEVEL = 0
 MAX_LOGSIZE = 5000000
 SAFESTART = False
 NOWEEKLY = False
@@ -103,7 +105,7 @@ CV_HEADERS = None
 CVURL = None
 DEMURL = None
 WWTURL = None
-TPSEURL = None
+WWT_CF_COOKIEVALUE = None
 KEYS_32P = None
 AUTHKEY_32P = None
 FEED_32P = None
@@ -120,12 +122,15 @@ USE_UTORRENT = False
 USE_WATCHDIR = False
 SNPOOL = None
 NZBPOOL = None
+SEARCHPOOL = None
 SNATCHED_QUEUE = Queue.Queue()
 NZB_QUEUE = Queue.Queue()
+PP_QUEUE = Queue.Queue()
+SEARCH_QUEUE = Queue.Queue()
+SEARCH_TIER_DATE = None
 COMICSORT = None
 PULLBYFILE = None
 CFG = None
-LOG_LIST = []
 CURRENT_WEEKNUMBER = None
 CURRENT_YEAR = None
 INSTALL_TYPE = None
@@ -135,17 +140,20 @@ LATEST_VERSION = None
 COMMITS_BEHIND = None
 LOCAL_IP = None
 DOWNLOAD_APIKEY = None
+APILOCK = False
+SEARCHLOCK = False
 CMTAGGER_PATH = None
 STATIC_COMICRN_VERSION = "1.01"
-STATIC_APC_VERSION = "1.0"
+STATIC_APC_VERSION = "2.04"
 SAB_PARAMS = None
+COMICINFO = []
 BOOTSWATCH_THEMELIST = []
 SCHED = BackgroundScheduler({
                              'apscheduler.executors.default': {
                                  'class':  'apscheduler.executors.pool:ThreadPoolExecutor',
                                  'max_workers': '20'
                              },
-                             'apscheduler.job_defaults.coalesce': 'false',
+                             'apscheduler.job_defaults.coalesce': 'true',
                              'apscheduler.job_defaults.max_instances': '3',
                              'apscheduler.timezone': 'UTC'})
 
@@ -154,80 +162,21 @@ SCHED = BackgroundScheduler({
 def initialize(config_file):
     with INIT_LOCK:
 
-        global CONFIG, _INITIALIZED, QUIET, CONFIG_FILE, CURRENT_VERSION, LATEST_VERSION, COMMITS_BEHIND, INSTALL_TYPE, IMPORTLOCK, PULLBYFILE, INKDROPS_32P, \
-               DONATEBUTTON, CURRENT_WEEKNUMBER, CURRENT_YEAR, UMASK, USER_AGENT, SNATCHED_QUEUE, NZB_QUEUE, PULLNEW, COMICSORT, WANTED_TAB_OFF, CV_HEADERS, \
-               IMPORTBUTTON, IMPORT_FILES, IMPORT_TOTALFILES, IMPORT_CID_COUNT, IMPORT_PARSED_COUNT, IMPORT_FAILURE_COUNT, CHECKENABLED, CVURL, DEMURL, WWTURL, TPSEURL, \
+        global CONFIG, _INITIALIZED, QUIET, CONFIG_FILE, OS_DETECT, MAINTENANCE, CURRENT_VERSION, LATEST_VERSION, COMMITS_BEHIND, INSTALL_TYPE, IMPORTLOCK, PULLBYFILE, INKDROPS_32P, \
+               DONATEBUTTON, CURRENT_WEEKNUMBER, CURRENT_YEAR, UMASK, USER_AGENT, SNATCHED_QUEUE, NZB_QUEUE, PP_QUEUE, SEARCH_QUEUE, PULLNEW, COMICSORT, WANTED_TAB_OFF, CV_HEADERS, \
+               IMPORTBUTTON, IMPORT_FILES, IMPORT_TOTALFILES, IMPORT_CID_COUNT, IMPORT_PARSED_COUNT, IMPORT_FAILURE_COUNT, CHECKENABLED, CVURL, DEMURL, WWTURL, WWT_CF_COOKIEVALUE, \
                USE_SABNZBD, USE_NZBGET, USE_BLACKHOLE, USE_RTORRENT, USE_UTORRENT, USE_QBITTORRENT, USE_DELUGE, USE_TRANSMISSION, USE_WATCHDIR, SAB_PARAMS, \
                PROG_DIR, DATA_DIR, CMTAGGER_PATH, DOWNLOAD_APIKEY, LOCAL_IP, STATIC_COMICRN_VERSION, STATIC_APC_VERSION, KEYS_32P, AUTHKEY_32P, FEED_32P, FEEDINFO_32P, \
-               MONITOR_STATUS, SEARCH_STATUS, RSS_STATUS, WEEKLY_STATUS, VERSION_STATUS, UPDATER_STATUS, DBUPDATE_INTERVAL, \
-               SCHED_RSS_LAST, SCHED_WEEKLY_LAST, SCHED_MONITOR_LAST, SCHED_SEARCH_LAST, SCHED_VERSION_LAST, SCHED_DBUPDATE_LAST, BOOTSWATCH_THEMELIST
+               MONITOR_STATUS, SEARCH_STATUS, RSS_STATUS, WEEKLY_STATUS, VERSION_STATUS, UPDATER_STATUS, DBUPDATE_INTERVAL, LOG_LANG, LOG_CHARSET, APILOCK, SEARCHLOCK, LOG_LEVEL, \
+               SCHED_RSS_LAST, SCHED_WEEKLY_LAST, SCHED_MONITOR_LAST, SCHED_SEARCH_LAST, SCHED_VERSION_LAST, SCHED_DBUPDATE_LAST, COMICINFO, SEARCH_TIER_DATE, BOOTSWATCH_THEMELIST
 
         cc = mylar.config.Config(config_file)
-        CONFIG = cc.read()
+        CONFIG = cc.read(startup=True)
 
         assert CONFIG is not None
 
         if _INITIALIZED:
             return False
-
-        #set up the default values here if they're wrong.
-        #cc.configure()
-
-        # Start the logger, silence console logging if we need to
-        logger.initLogger(console=not QUIET, log_dir=CONFIG.LOG_DIR, verbose=VERBOSE) #logger.mylar_log.initLogger(verbose=VERBOSE)
-
-        #try to get the local IP using socket. Get this on every startup so it's at least current for existing session.
-        import socket
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(('8.8.8.8', 80))
-            LOCAL_IP = s.getsockname()[0]
-            s.close()
-            logger.info('Successfully discovered local IP and locking it in as : ' + str(LOCAL_IP))
-        except:
-            logger.warn('Unable to determine local IP - this might cause problems when downloading (maybe use host_return in the config.ini)')
-            LOCAL_IP = CONFIG.HTTP_HOST
-
-
-        # verbatim back the logger being used since it's now started.
-        if LOGTYPE == 'clog':
-            logprog = 'Concurrent Rotational Log Handler'
-        else:
-            logprog = 'Rotational Log Handler (default)'
-
-        logger.fdebug('Logger set to use : ' + logprog)
-        if LOGTYPE == 'log' and OS_DETECT == 'Windows':
-            logger.fdebug('ConcurrentLogHandler package not installed. Using builtin log handler for Rotational logs (default)')
-            logger.fdebug('[Windows Users] If you are experiencing log file locking and want this auto-enabled, you need to install Python Extensions for Windows ( http://sourceforge.net/projects/pywin32/ )')
-
-        logger.info('Config GIT Branch: %s' % CONFIG.GIT_BRANCH)
-
-        # Get the currently installed version - returns None, 'win32' or the git hash
-        # Also sets INSTALL_TYPE variable to 'win', 'git' or 'source'
-        CURRENT_VERSION, CONFIG.GIT_BRANCH = versioncheck.getVersion()
-        #versioncheck.getVersion()
-        #config_write()
-
-        if CURRENT_VERSION is not None:
-            hash = CURRENT_VERSION[:7]
-        else:
-            hash = "unknown"
-
-        if CONFIG.GIT_BRANCH == 'master':
-            vers = 'M'
-        elif CONFIG.GIT_BRANCH == 'development':
-           vers = 'D'
-        else:
-           vers = 'NONE'
-
-        USER_AGENT = 'Mylar/' +str(hash) +'(' +vers +') +http://www.github.com/evilhero/mylar/'
-
-        CV_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:40.0) Gecko/20100101 Firefox/40.1'}
-
-        # set the current week for the pull-list
-        todaydate = datetime.datetime.today()
-        CURRENT_WEEKNUMBER = todaydate.strftime("%U")
-        CURRENT_YEAR = todaydate.strftime("%Y")
 
         # Initialize the database
         logger.info('Checking to see if the database has all tables....')
@@ -236,34 +185,60 @@ def initialize(config_file):
         except Exception, e:
             logger.error('Cannot connect to the database: %s' % e)
 
-        # Check for new versions (autoupdate)
-        if CONFIG.CHECK_GITHUB_ON_STARTUP:
+        if MAINTENANCE is False:
+            #try to get the local IP using socket. Get this on every startup so it's at least current for existing session.
+            import socket
             try:
-                LATEST_VERSION = versioncheck.checkGithub()
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(('8.8.8.8', 80))
+                LOCAL_IP = s.getsockname()[0]
+                s.close()
+                logger.info('Successfully discovered local IP and locking it in as : ' + str(LOCAL_IP))
             except:
-                LATEST_VERSION = CURRENT_VERSION
-        else:
-            LATEST_VERSION = CURRENT_VERSION
-#
-        if CONFIG.AUTO_UPDATE:
-            if CURRENT_VERSION != LATEST_VERSION and INSTALL_TYPE != 'win' and COMMITS_BEHIND > 0:
-                logger.info('Auto-updating has been enabled. Attempting to auto-update.')
-#                SIGNAL = 'update'
+                logger.warn('Unable to determine local IP - this might cause problems when downloading (maybe use host_return in the config.ini)')
+                LOCAL_IP = CONFIG.HTTP_HOST
 
-        #check for syno_fix here
-        if CONFIG.SYNO_FIX:
-            parsepath = os.path.join(DATA_DIR, 'bs4', 'builder', '_lxml.py')
-            if os.path.isfile(parsepath):
-                print ("found bs4...renaming appropriate file.")
-                src = os.path.join(parsepath)
-                dst = os.path.join(DATA_DIR, 'bs4', 'builder', 'lxml.py')
-                try:
-                    shutil.move(src, dst)
-                except (OSError, IOError):
-                    logger.error('Unable to rename file...shutdown Mylar and go to ' + src.encode('utf-8') + ' and rename the _lxml.py file to lxml.py')
-                    logger.error('NOT doing this will result in errors when adding / refreshing a series')
+
+            # verbatim back the logger being used since it's now started.
+            if LOGTYPE == 'clog':
+                logprog = 'Concurrent Rotational Log Handler'
             else:
-                logger.info('Synology Parsing Fix already implemented. No changes required at this time.')
+                logprog = 'Rotational Log Handler (default)'
+
+            logger.fdebug('Logger set to use : ' + logprog)
+            if LOGTYPE == 'log' and OS_DETECT == 'Windows':
+                logger.fdebug('ConcurrentLogHandler package not installed. Using builtin log handler for Rotational logs (default)')
+                logger.fdebug('[Windows Users] If you are experiencing log file locking and want this auto-enabled, you need to install Python Extensions for Windows ( http://sourceforge.net/projects/pywin32/ )')
+
+            #check for syno_fix here
+            if CONFIG.SYNO_FIX:
+                parsepath = os.path.join(DATA_DIR, 'bs4', 'builder', '_lxml.py')
+                if os.path.isfile(parsepath):
+                    print ("found bs4...renaming appropriate file.")
+                    src = os.path.join(parsepath)
+                    dst = os.path.join(DATA_DIR, 'bs4', 'builder', 'lxml.py')
+                    try:
+                        shutil.move(src, dst)
+                    except (OSError, IOError):
+                        logger.error('Unable to rename file...shutdown Mylar and go to ' + src.encode('utf-8') + ' and rename the _lxml.py file to lxml.py')
+                        logger.error('NOT doing this will result in errors when adding / refreshing a series')
+                else:
+                    logger.info('Synology Parsing Fix already implemented. No changes required at this time.')
+
+
+        CV_HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:40.0) Gecko/20100101 Firefox/40.1'}
+
+        # set the current week for the pull-list
+        todaydate = datetime.datetime.today()
+        CURRENT_WEEKNUMBER = todaydate.strftime("%U")
+        CURRENT_YEAR = todaydate.strftime("%Y")
+
+        if SEARCH_TIER_DATE is None:
+            #tier the wanted listed so anything older than 14 days won't trigger the API during searches.
+            #utc_date = datetime.datetime.utcnow()
+            STD = todaydate - timedelta(days = 14)
+            SEARCH_TIER_DATE = STD.strftime('%Y-%m-%d')
+            logger.fdebug('SEARCH_TIER_DATE set to : %s' % SEARCH_TIER_DATE)
 
         #set the default URL for ComicVine API here.
         CVURL = 'https://comicvine.gamespot.com/api/'
@@ -271,15 +246,14 @@ def initialize(config_file):
         #set default URL for Public trackers (just in case it changes more frequently)
         WWTURL = 'https://worldwidetorrents.me/'
         DEMURL = 'https://www.demonoid.pw/'
-        TPSEURL = 'https://torrentproject.se/'
 
         if CONFIG.LOCMOVE:
             helpers.updateComicLocation()
 
-
         #Ordering comics here
-        logger.info('Remapping the sorting to allow for new additions.')
-        COMICSORT = helpers.ComicSort(sequence='startup')
+        if mylar.MAINTENANCE is False:
+            logger.info('Remapping the sorting to allow for new additions.')
+            COMICSORT = helpers.ComicSort(sequence='startup')
 
         # Store the original umask
         UMASK = os.umask(0)
@@ -396,7 +370,7 @@ def start():
             SCHED_RSS_LAST = monitors['rss']
 
             # Start our scheduled background tasks
-            SCHED.add_job(func=updater.dbUpdate, id='dbupdater', name='DB Updater', args=[None,None,True], trigger=IntervalTrigger(hours=0, minutes=5, timezone='UTC'))
+            SCHED.add_job(func=updater.dbUpdate, id='dbupdater', name='DB Updater', args=[None,None,True], trigger=IntervalTrigger(hours=5, minutes=5, timezone='UTC'))
 
             #let's do a run at the Wanted issues here (on startup) if enabled.
             ss = searchit.CurrentSearcher()
@@ -436,6 +410,15 @@ def start():
                 elif CONFIG.NZB_DOWNLOADER == 1:
                     logger.info('[AUTO-COMPLETE-NZB] Succesfully started Completed post-processing handling for NZBGet - will now monitor for completed nzbs within nzbget and post-process automatically....')
 
+            logger.info('[SEARCH-QUEUE] Attempting to background load the search queue....')
+            SEARCHPOOL = threading.Thread(target=helpers.search_queue, args=(SEARCH_QUEUE,), name="SEARCH-QUEUE")
+            SEARCHPOOL.start()
+
+            if all([CONFIG.POST_PROCESSING is True, CONFIG.API_ENABLED is True]):
+                logger.info('[POST-PROCESS-QUEUE] Post Process queue enabled & monitoring for api requests....')
+                PPPOOL = threading.Thread(target=helpers.postprocess_main, args=(PP_QUEUE,), name="POST-PROCESS-QUEUE")
+                PPPOOL.start()
+                logger.info('[POST-PROCESS-QUEUE] Succesfully started Post-Processing Queuer....')
 
             helpers.latestdate_fix()
 
@@ -473,6 +456,7 @@ def start():
                 SCHED.add_job(func=ws.run, id='weekly', name='Weekly Pullist', next_run_time=weekly_diff, trigger=IntervalTrigger(hours=weektimer, minutes=0, timezone='UTC'))
 
             #initiate startup rss feeds for torrents/nzbs here...
+            rs = rsscheckit.tehMain()
             if CONFIG.ENABLE_RSS:
                 logger.info('[RSS-FEEDS] Initiating startup-RSS feed checks.')
                 if SCHED_RSS_LAST is not None:
@@ -480,7 +464,6 @@ def start():
                     logger.info('[RSS-FEEDS] RSS last run @ %s' % datetime.datetime.utcfromtimestamp(rss_timestamp))
                 else:
                     rss_timestamp = helpers.utctimestamp() + (int(CONFIG.RSS_CHECKINTERVAL) *60)
-                rs = rsscheckit.tehMain()
                 duration_diff = (helpers.utctimestamp() - rss_timestamp)/60
                 if duration_diff >= int(CONFIG.RSS_CHECKINTERVAL):
                     SCHED.add_job(func=rs.run, id='rss', name='RSS Feeds', args=[True], next_run_time=datetime.datetime.utcnow(), trigger=IntervalTrigger(hours=0, minutes=int(CONFIG.RSS_CHECKINTERVAL), timezone='UTC'))
@@ -488,6 +471,9 @@ def start():
                     rss_diff = datetime.datetime.utcfromtimestamp(helpers.utctimestamp() + (int(CONFIG.RSS_CHECKINTERVAL) * 60) - (duration_diff * 60))
                     logger.fdebug('[RSS-FEEDS] Scheduling next run for @ %s every %s minutes' % (rss_diff, CONFIG.RSS_CHECKINTERVAL))
                     SCHED.add_job(func=rs.run, id='rss', name='RSS Feeds', args=[True], next_run_time=rss_diff, trigger=IntervalTrigger(hours=0, minutes=int(CONFIG.RSS_CHECKINTERVAL), timezone='UTC'))
+            #else:
+            #    SCHED.add_job(func=rs.run, id='rss', name='RSS Feeds', args=[True], trigger=IntervalTrigger(hours=0, minutes=int(CONFIG.RSS_CHECKINTERVAL), timezone='UTC'))
+            #    SCHED.pause_job('rss')
 
             if CONFIG.CHECK_GITHUB:
                 vs = versioncheckit.CheckVersion()
@@ -519,16 +505,25 @@ def dbcheck():
     c_error = 'sqlite3.OperationalError'
     c=conn.cursor()
 
-    c.execute('CREATE TABLE IF NOT EXISTS comics (ComicID TEXT UNIQUE, ComicName TEXT, ComicSortName TEXT, ComicYear TEXT, DateAdded TEXT, Status TEXT, IncludeExtras INTEGER, Have INTEGER, Total INTEGER, ComicImage TEXT, ComicPublisher TEXT, ComicLocation TEXT, ComicPublished TEXT, NewPublish TEXT, LatestIssue TEXT, LatestDate TEXT, Description TEXT, QUALalt_vers TEXT, QUALtype TEXT, QUALscanner TEXT, QUALquality TEXT, LastUpdated TEXT, AlternateSearch TEXT, UseFuzzy TEXT, ComicVersion TEXT, SortOrder INTEGER, DetailURL TEXT, ForceContinuing INTEGER, ComicName_Filesafe TEXT, AlternateFileName TEXT, ComicImageURL TEXT, ComicImageALTURL TEXT, DynamicComicName TEXT, AllowPacks TEXT, Type TEXT, Corrected_SeriesYear TEXT)')
+    try:
+        c.execute('SELECT ReleaseDate from storyarcs')
+    except sqlite3.OperationalError:
+        try:
+            c.execute('CREATE TABLE IF NOT EXISTS storyarcs(StoryArcID TEXT, ComicName TEXT, IssueNumber TEXT, SeriesYear TEXT, IssueYEAR TEXT, StoryArc TEXT, TotalIssues TEXT, Status TEXT, inCacheDir TEXT, Location TEXT, IssueArcID TEXT, ReadingOrder INT, IssueID TEXT, ComicID TEXT, ReleaseDate TEXT, IssueDate TEXT, Publisher TEXT, IssuePublisher TEXT, IssueName TEXT, CV_ArcID TEXT, Int_IssueNumber INT, DynamicComicName TEXT, Volume TEXT, Manual TEXT, DateAdded TEXT)')
+            c.execute('INSERT INTO storyarcs(StoryArcID, ComicName, IssueNumber, SeriesYear, IssueYEAR, StoryArc, TotalIssues, Status, inCacheDir, Location, IssueArcID, ReadingOrder, IssueID, ComicID, ReleaseDate, IssueDate, Publisher, IssuePublisher, IssueName, CV_ArcID, Int_IssueNumber, DynamicComicName, Volume, Manual) SELECT StoryArcID, ComicName, IssueNumber, SeriesYear, IssueYEAR, StoryArc, TotalIssues, Status, inCacheDir, Location, IssueArcID, ReadingOrder, IssueID, ComicID, StoreDate, IssueDate, Publisher, IssuePublisher, IssueName, CV_ArcID, Int_IssueNumber, DynamicComicName, Volume, Manual FROM readinglist')
+            c.execute('DROP TABLE readinglist')
+        except sqlite3.OperationalError:
+            logger.warn('Unable to update readinglist table to new storyarc table format.')
+
+    c.execute('CREATE TABLE IF NOT EXISTS comics (ComicID TEXT UNIQUE, ComicName TEXT, ComicSortName TEXT, ComicYear TEXT, DateAdded TEXT, Status TEXT, IncludeExtras INTEGER, Have INTEGER, Total INTEGER, ComicImage TEXT, ComicPublisher TEXT, ComicLocation TEXT, ComicPublished TEXT, NewPublish TEXT, LatestIssue TEXT, LatestDate TEXT, Description TEXT, QUALalt_vers TEXT, QUALtype TEXT, QUALscanner TEXT, QUALquality TEXT, LastUpdated TEXT, AlternateSearch TEXT, UseFuzzy TEXT, ComicVersion TEXT, SortOrder INTEGER, DetailURL TEXT, ForceContinuing INTEGER, ComicName_Filesafe TEXT, AlternateFileName TEXT, ComicImageURL TEXT, ComicImageALTURL TEXT, DynamicComicName TEXT, AllowPacks TEXT, Type TEXT, Corrected_SeriesYear TEXT, TorrentID_32P TEXT, LatestIssueID TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS issues (IssueID TEXT, ComicName TEXT, IssueName TEXT, Issue_Number TEXT, DateAdded TEXT, Status TEXT, Type TEXT, ComicID TEXT, ArtworkURL Text, ReleaseDate TEXT, Location TEXT, IssueDate TEXT, Int_IssueNumber INT, ComicSize TEXT, AltIssueNumber TEXT, IssueDate_Edit TEXT, ImageURL TEXT, ImageURL_ALT TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS snatched (IssueID TEXT, ComicName TEXT, Issue_Number TEXT, Size INTEGER, DateAdded TEXT, Status TEXT, FolderName TEXT, ComicID TEXT, Provider TEXT, Hash TEXT, crc TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS upcoming (ComicName TEXT, IssueNumber TEXT, ComicID TEXT, IssueID TEXT, IssueDate TEXT, Status TEXT, DisplayComicName TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS nzblog (IssueID TEXT, NZBName TEXT, SARC TEXT, PROVIDER TEXT, ID TEXT, AltNZBName TEXT, OneOff TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS weekly (SHIPDATE TEXT, PUBLISHER TEXT, ISSUE TEXT, COMIC VARCHAR(150), EXTRA TEXT, STATUS TEXT, ComicID TEXT, IssueID TEXT, CV_Last_Update TEXT, DynamicName TEXT, weeknumber TEXT, year TEXT, volume TEXT, seriesyear TEXT, rowid INTEGER PRIMARY KEY)')
+    c.execute('CREATE TABLE IF NOT EXISTS weekly (SHIPDATE TEXT, PUBLISHER TEXT, ISSUE TEXT, COMIC VARCHAR(150), EXTRA TEXT, STATUS TEXT, ComicID TEXT, IssueID TEXT, CV_Last_Update TEXT, DynamicName TEXT, weeknumber TEXT, year TEXT, volume TEXT, seriesyear TEXT, annuallink TEXT, rowid INTEGER PRIMARY KEY)')
     c.execute('CREATE TABLE IF NOT EXISTS importresults (impID TEXT, ComicName TEXT, ComicYear TEXT, Status TEXT, ImportDate TEXT, ComicFilename TEXT, ComicLocation TEXT, WatchMatch TEXT, DisplayName TEXT, SRID TEXT, ComicID TEXT, IssueID TEXT, Volume TEXT, IssueNumber TEXT, DynamicName TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS readlist (IssueID TEXT, ComicName TEXT, Issue_Number TEXT, Status TEXT, DateAdded TEXT, Location TEXT, inCacheDir TEXT, SeriesYear TEXT, ComicID TEXT, StatusChange TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS readinglist(StoryArcID TEXT, ComicName TEXT, IssueNumber TEXT, SeriesYear TEXT, IssueYEAR TEXT, StoryArc TEXT, TotalIssues TEXT, Status TEXT, inCacheDir TEXT, Location TEXT, IssueArcID TEXT, ReadingOrder INT, IssueID TEXT, ComicID TEXT, StoreDate TEXT, IssueDate TEXT, Publisher TEXT, IssuePublisher TEXT, IssueName TEXT, CV_ArcID TEXT, Int_IssueNumber INT, DynamicComicName TEXT, Volume TEXT, Manual TEXT)')
-    c.execute('CREATE TABLE IF NOT EXISTS annuals (IssueID TEXT, Issue_Number TEXT, IssueName TEXT, IssueDate TEXT, Status TEXT, ComicID TEXT, GCDComicID TEXT, Location TEXT, ComicSize TEXT, Int_IssueNumber INT, ComicName TEXT, ReleaseDate TEXT, ReleaseComicID TEXT, ReleaseComicName TEXT, IssueDate_Edit TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS annuals (IssueID TEXT, Issue_Number TEXT, IssueName TEXT, IssueDate TEXT, Status TEXT, ComicID TEXT, GCDComicID TEXT, Location TEXT, ComicSize TEXT, Int_IssueNumber INT, ComicName TEXT, ReleaseDate TEXT, ReleaseComicID TEXT, ReleaseComicName TEXT, IssueDate_Edit TEXT, DateAdded TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS rssdb (Title TEXT UNIQUE, Link TEXT, Pubdate TEXT, Site TEXT, Size TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS futureupcoming (ComicName TEXT, IssueNumber TEXT, ComicID TEXT, IssueID TEXT, IssueDate TEXT, Publisher TEXT, Status TEXT, DisplayComicName TEXT, weeknumber TEXT, year TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS failed (ID TEXT, Status TEXT, ComicID TEXT, IssueID TEXT, Provider TEXT, ComicName TEXT, Issue_Number TEXT, NZBName TEXT, DateFailed TEXT)')
@@ -536,6 +531,7 @@ def dbcheck():
     c.execute('CREATE TABLE IF NOT EXISTS ref32p (ComicID TEXT UNIQUE, ID TEXT, Series TEXT, Updated TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS oneoffhistory (ComicName TEXT, IssueNumber TEXT, ComicID TEXT, IssueID TEXT, Status TEXT, weeknumber TEXT, year TEXT)')
     c.execute('CREATE TABLE IF NOT EXISTS jobhistory (JobName TEXT, prev_run_datetime timestamp, prev_run_timestamp REAL, next_run_datetime timestamp, next_run_timestamp REAL, last_run_completed TEXT, successful_completions TEXT, failed_completions TEXT, status TEXT)')
+    c.execute('CREATE TABLE IF NOT EXISTS manualresults (provider TEXT, id TEXT, kind TEXT, comicname TEXT, volume TEXT, oneoff TEXT, fullprov TEXT, issuenumber TEXT, modcomicname TEXT, name TEXT, link TEXT, size TEXT, pack_numbers TEXT, pack_issuelist TEXT, comicyear TEXT, issuedate TEXT, tmpprov TEXT, pack TEXT, issueid TEXT, comicid TEXT, sarc TEXT, issuearcid TEXT)')
     conn.commit
     c.close
 
@@ -641,6 +637,16 @@ def dbcheck():
         c.execute('ALTER TABLE comics ADD COLUMN Corrected_SeriesYear TEXT')
 
     try:
+        c.execute('SELECT TorrentID_32P from comics')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE comics ADD COLUMN TorrentID_32P TEXT')
+
+    try:
+        c.execute('SELECT LatestIssueID from comics')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE comics ADD COLUMN LatestIssueID TEXT')
+
+    try:
         c.execute('SELECT DynamicComicName from comics')
         if CONFIG.DYNAMIC_UPDATE < 3:
             dynamic_upgrade = True
@@ -681,7 +687,6 @@ def dbcheck():
         c.execute('SELECT ImageURL_ALT from issues')
     except sqlite3.OperationalError:
         c.execute('ALTER TABLE issues ADD COLUMN ImageURL_ALT TEXT')
-
 
     ## -- ImportResults Table --
 
@@ -829,6 +834,11 @@ def dbcheck():
     except sqlite3.OperationalError:
         c.execute('ALTER TABLE weekly ADD COLUMN seriesyear TEXT')
 
+    try:
+        c.execute('SELECT annuallink from weekly')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE weekly ADD COLUMN annuallink TEXT')
+
     ## -- Nzblog Table --
 
     try:
@@ -855,6 +865,7 @@ def dbcheck():
         c.execute('SELECT OneOff from nzblog')
     except sqlite3.OperationalError:
         c.execute('ALTER TABLE nzblog ADD COLUMN OneOff TEXT')
+
     ## -- Annuals Table --
 
     try:
@@ -903,6 +914,10 @@ def dbcheck():
     except sqlite3.OperationalError:
         c.execute('ALTER TABLE annuals ADD COLUMN IssueDate_Edit TEXT')
 
+    try:
+        c.execute('SELECT DateAdded from annuals')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE annuals ADD COLUMN DateAdded TEXT')
 
     ## -- Snatched Table --
 
@@ -929,67 +944,72 @@ def dbcheck():
         c.execute('ALTER TABLE upcoming ADD COLUMN DisplayComicName TEXT')
 
 
-    ## -- Readinglist Table --
+    ## -- storyarcs Table --
 
     try:
-        c.execute('SELECT ComicID from readinglist')
+        c.execute('SELECT ComicID from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN ComicID TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN ComicID TEXT')
 
     try:
-        c.execute('SELECT StoreDate from readinglist')
+        c.execute('SELECT StoreDate from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN StoreDate TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN StoreDate TEXT')
 
     try:
-        c.execute('SELECT IssueDate from readinglist')
+        c.execute('SELECT IssueDate from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN IssueDate TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN IssueDate TEXT')
 
     try:
-        c.execute('SELECT Publisher from readinglist')
+        c.execute('SELECT Publisher from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN Publisher TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN Publisher TEXT')
 
     try:
-        c.execute('SELECT IssuePublisher from readinglist')
+        c.execute('SELECT IssuePublisher from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN IssuePublisher TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN IssuePublisher TEXT')
 
     try:
-        c.execute('SELECT IssueName from readinglist')
+        c.execute('SELECT IssueName from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN IssueName TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN IssueName TEXT')
 
     try:
-        c.execute('SELECT CV_ArcID from readinglist')
+        c.execute('SELECT CV_ArcID from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN CV_ArcID TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN CV_ArcID TEXT')
 
     try:
-        c.execute('SELECT Int_IssueNumber from readinglist')
+        c.execute('SELECT Int_IssueNumber from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN Int_IssueNumber INT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN Int_IssueNumber INT')
 
     try:
-        c.execute('SELECT DynamicComicName from readinglist')
+        c.execute('SELECT DynamicComicName from storyarcs')
         if CONFIG.DYNAMIC_UPDATE < 4:
             dynamic_upgrade = True
         else:
             dynamic_upgrade = False
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN DynamicComicName TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN DynamicComicName TEXT')
         dynamic_upgrade = True
 
     try:
-        c.execute('SELECT Volume from readinglist')
+        c.execute('SELECT Volume from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN Volume TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN Volume TEXT')
 
     try:
-        c.execute('SELECT Manual from readinglist')
+        c.execute('SELECT Manual from storyarcs')
     except sqlite3.OperationalError:
-        c.execute('ALTER TABLE readinglist ADD COLUMN Manual TEXT')
+        c.execute('ALTER TABLE storyarcs ADD COLUMN Manual TEXT')
+
+    try:
+        c.execute('SELECT DateAdded from storyarcs')
+    except sqlite3.OperationalError:
+        c.execute('ALTER TABLE storyarcs ADD COLUMN DateAdded TEXT')
 
     ## -- searchresults Table --
     try:
@@ -1072,7 +1092,8 @@ def dbcheck():
     c.execute("DELETE from annuals WHERE ComicName='None' OR ComicName is NULL or Issue_Number is NULL")
     c.execute("DELETE from upcoming WHERE ComicName='None' OR ComicName is NULL or IssueNumber is NULL")
     c.execute("DELETE from importresults WHERE ComicName='None' OR ComicName is NULL")
-    c.execute("DELETE from Failed WHERE ComicName='None' OR ComicName is NULL")
+    c.execute("DELETE from storyarcs WHERE StoryArcID is NULL OR StoryArc is NULL")
+    c.execute("DELETE from Failed WHERE ComicName='None' OR ComicName is NULL OR ID is NULL")
     logger.info('Ensuring DB integrity - Removing all Erroneous Comics (ie. named None)')
 
     logger.info('Correcting Null entries that make the main page break on startup.')
@@ -1119,7 +1140,7 @@ def csv_load():
                     try:
                         shutil.copy(os.path.join(DATA_DIR, "custom_exceptions_sample.csv"), EXCEPTIONS_FILE)
                     except (OSError, IOError):
-                        logger.error('Cannot create custom_exceptions.csv in ' + str(DATA_DIR) + '. Make sure _sample.csv is present and/or check permissions.')
+                        logger.error('Cannot create custom_exceptions.csv in ' + str(DATA_DIR) + '. Make sure custom_exceptions_sample.csv is present and/or check permissions.')
                         return
                 else:
                     logger.error('Could not locate ' + str(EXCEPTIONS[i]) + ' file. Make sure it is in datadir: ' + DATA_DIR)
@@ -1177,12 +1198,25 @@ def halt():
                     SNPOOL.join(5)
                 except AssertionError:
                     os._exit(0)
+
+
+            if SEARCHPOOL is not None:
+                logger.info('Terminating the search queue thread.')
+                try:
+                    SEARCHPOOL.join(10)
+                    logger.info('Joined pool for termination -  successful')
+                except KeyboardInterrupt:
+                    SEARCH_QUEUE.put('exit')
+                    SEARCHPOOL.join(5)
+                except AssertionError:
+                    os._exit(0)
             _INITIALIZED = False
 
-def shutdown(restart=False, update=False):
+def shutdown(restart=False, update=False, maintenance=False):
 
-    cherrypy.engine.exit()
-    halt()
+    if maintenance is False:
+        cherrypy.engine.exit()
+        halt()
 
     if not restart and not update:
         logger.info('Mylar is shutting down...')
@@ -1200,9 +1234,12 @@ def shutdown(restart=False, update=False):
     if restart:
         logger.info('Mylar is restarting...')
         popen_list = [sys.executable, FULL_PATH]
-        popen_list += ARGS
-#        if '--nolaunch' not in popen_list:
-#            popen_list += ['--nolaunch']
+        if 'maintenance' not in ARGS:
+            popen_list += ARGS
+        else:
+            for x in ARGS:
+                if all([x != 'maintenance', x != '-u']):
+                    popen_list += x
         logger.info('Restarting Mylar with ' + str(popen_list))
         subprocess.Popen(popen_list, cwd=os.getcwd())
 

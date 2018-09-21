@@ -25,6 +25,7 @@ import mylar
 from mylar import logger
 from mylar.webserve import WebInterface
 from mylar.helpers import create_https_certificates
+from mylar.api import REST
 
 def initialize(options):
 
@@ -68,22 +69,9 @@ def initialize(options):
     else:
         protocol = "http"
 
-    logger.info("Starting Mylar on %s://%s:%d/", protocol,
-        options['http_host'], options['http_port'])
+    logger.info("Starting Mylar on %s://%s:%d%s" % (protocol,options['http_host'], options['http_port'], options['http_root']))
     cherrypy.config.update(options_dict)
 
-#    cherrypy.config.update({
-#                'log.screen':           False,
-#                'server.thread_pool':   10,
-#                'server.socket_port':   options['http_port'],
-#                'server.socket_host':   options['http_host'],
-#                'engine.autoreload_on': False,
-#        })
-
-    #conf = {
-    #    '/': {
-    #        'tools.staticdir.root': os.path.join(mylar.PROG_DIR, 'data')
-    #    },
     conf = {
         '/': {
             'tools.staticdir.root': os.path.join(mylar.PROG_DIR, 'data')
@@ -112,18 +100,58 @@ def initialize(options):
         '/cache': {
             'tools.staticdir.on': True,
             'tools.staticdir.dir': mylar.CONFIG.CACHE_DIR,
-            'tools.auth_basic.on': False
+            'tools.auth_basic.on': False,
+            'tools.auth.on': False
         }
     }
 
     if options['http_password'] is not None:
-        conf['/'].update({
-            'tools.auth_basic.on': True,
-            'tools.auth_basic.realm': 'Mylar',
-            'tools.auth_basic.checkpassword':  cherrypy.lib.auth_basic.checkpassword_dict(
-                    {options['http_username']: options['http_password']})
-        })
-        conf['/api'] = {'tools.auth_basic.on': False}
+        #userpassdict = dict(zip((options['http_username'].encode('utf-8'),), (options['http_password'].encode('utf-8'),)))
+        #get_ha1= cherrypy.lib.auth_digest.get_ha1_dict_plain(userpassdict)
+        if options['authentication'] == 2:
+            # Set up a sessions based login page instead of using basic auth,
+            # using the credentials set for basic auth. Attempting to browse to
+            # a restricted page without a session token will result in a
+            # redirect to the login page. A sucessful login should then redirect
+            # to the originally requested page.
+            #
+            # Login sessions timeout after 43800 minutes (1 month) unless
+            # changed in the config.
+            cherrypy.tools.sessions.timeout = options['login_timeout']
+            conf['/'].update({
+                'tools.sessions.on': True,
+                'tools.auth.on': True,
+                'auth.forms_username': options['http_username'],
+                'auth.forms_password': options['http_password'],
+                # Set all pages to require authentication.
+                # You can also set auth requirements on a per-method basis by
+                # using the @require() decorator on the methods in webserve.py
+                'auth.require': []
+            })
+            # exempt api, login page and static elements from authentication requirements
+            for i in ('/api', '/auth/login', '/css', '/images', '/js', 'favicon.ico'):
+                if i in conf:
+                    conf[i].update({'tools.auth.on': False})
+                else:
+                    conf[i] = {'tools.auth.on': False}
+        elif options['authentication'] == 1:
+            conf['/'].update({
+                        'tools.auth_basic.on': True,
+                        'tools.auth_basic.realm': 'Mylar',
+                        'tools.auth_basic.checkpassword':  cherrypy.lib.auth_basic.checkpassword_dict(
+                                {options['http_username']: options['http_password']})
+                    })
+            conf['/api'] = {'tools.auth_basic.on': False}
+
+    rest_api = {
+        '/': {
+                # the api uses restful method dispatching
+                'request.dispatch': cherrypy.dispatch.MethodDispatcher(),
+
+                # all api calls require that the client passes HTTP basic authentication
+                'tools.auth_basic.on' : False,
+             }
+    }
 
     if options['opds_authentication']:
         user_list = {}
@@ -141,6 +169,14 @@ def initialize(options):
     cherrypy.engine.timeout_monitor.unsubscribe()
 
     cherrypy.tree.mount(WebInterface(), str(options['http_root']), config = conf)
+
+    restroot = REST()
+    restroot.comics = restroot.Comics()
+    restroot.comic = restroot.Comic()
+    restroot.watchlist = restroot.Watchlist()
+    #restroot.issues = restroot.comic.Issues()
+    #restroot.issue = restroot.comic.Issue()
+    cherrypy.tree.mount(restroot, '/rest', config = rest_api)
 
     try:
         cherrypy.process.servers.check_port(options['http_host'], options['http_port'])
