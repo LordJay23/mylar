@@ -1,0 +1,89 @@
+{
+  "interface_1": {
+    "type": "column",
+    "width": "6",
+    "content": [
+      {
+        "type": "legend",
+        "text": "Basic"
+      },
+      {
+        "type": "text",
+        "label": "HTTP Host",
+        "id": "http_host",
+        "small": "e.g. localhost or 0.0.0.0"
+      },
+      {
+        "type": "text",
+        "label": "HTTP Port",
+        "id": "http_port"
+      },
+      {
+        "type": "checkbox",
+        "label": "Enable HTTPS",
+        "label_desc": "Enable HTTPS for web server for encrypted communication",
+        "id": "enable_https"
+      },
+      {
+        "type": "container",
+        "id": "https_options",
+        "content": [
+          {
+            "type": "text",
+            "label": "HTTPS Cert",
+            "id": "https_cert"
+          },
+          {
+            "type": "text",
+            "label": "HTTPS Key",
+            "id": "https_key"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "label": "Authentication",
+        "id": "authentication",
+        "options": [
+          {
+            "value": "0",
+            "label": "None"
+          },
+          {
+            "value": "1",
+            "label": "Basic (Browser Popup)"
+          },
+          {
+            "value": "2",
+            "label": "Forms (Login Page)"
+          }
+        ]
+      },
+      {
+        "type": "container",
+        "id": "auth_options",
+        "content": [
+          {"type": "text", "id": "http_user", "label": "HTTP Username"},
+          {"type": "password", "id": "http_pass", "label": "HTTP Password"}
+        ]
+      }
+
+    ]
+  },
+  "section_toggles": [
+    ["enable_https","https_options"],
+    ["api_enabled","apioptions"],
+    ["opds_enable", "opdsoptions"],
+    ["enforce_perms", "perms_options"],
+    ["sab_to_mylar", "form_sab_directory"]
+  ],
+  "select_toggles":
+    {
+      "authentication": [
+        {"option": "0", "show": "", "hide": "auth_options"},
+        {"option": "1", "show": "auth_options", "hide": ""},
+        {"option": "2", "show": "auth_options", "hide": ""}
+      ]
+    }
+
+}

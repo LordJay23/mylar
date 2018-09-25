@@ -4724,7 +4724,10 @@ class WebInterface(object):
                     "dltotals": freq_tot,
                     "alphaindex": mylar.CONFIG.ALPHAINDEX
                }
-        return serve_template(templatename="config.html", title="Settings", config=config, comicinfo=comicinfo)
+        cformdatafile = os.path.join(mylar.PROG_DIR,'mylar','config.json')
+        with open(cformdatafile) as cformfile:
+            cformdata = simplejson.load(cformfile)
+        return serve_template(templatename="config.html", title="Settings", config=config, comicinfo=comicinfo, cformdata=cformdata)
     config.exposed = True
 
     def error_change(self, comicid, errorgcd, comicname, comicyear, imported=None, mogcname=None):

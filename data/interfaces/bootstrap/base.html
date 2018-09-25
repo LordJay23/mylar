@@ -16,8 +16,9 @@
     <meta name="author" content="">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
     <link rel="shortcut icon" type="image/png"  href="images/favicon.ico">
-      <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.15/css/dataTables.bootstrap.min.css"/>
-    <link href="https://maxcdn.bootstrapcdn.com/bootswatch/3.3.7/${theme}/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/v/bs4/dt-1.10.18/datatables.min.css"/>
+    <!-- <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.10.15/css/dataTables.bootstrap.min.css"/> -->
+    <link href="https://maxcdn.bootstrapcdn.com/bootswatch/4.1.3/${theme}/bootstrap.min.css" rel="stylesheet">
     <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" rel="stylesheet">
       <link href="/css/bootstrap_custom.css?v=1" rel="stylesheet">
     <link href="/css/bootstrap.css?v=1" rel="stylesheet">
@@ -59,9 +60,10 @@
           $('td input:checkbox', table).prop('checked', e.checked);
       }
     </script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.1.3/js/bootstrap.min.js"></script>
       <script src="https://cdn.datatables.net/1.10.15/js/jquery.dataTables.min.js"></script>
-      <script src="https://cdn.datatables.net/1.10.15/js/dataTables.bootstrap.min.js"></script>
+      <script type="text/javascript" src="https://cdn.datatables.net/v/bs4/dt-1.10.18/datatables.min.js"></script>
+      <!-- <script src="https://cdn.datatables.net/1.10.15/js/dataTables.bootstrap.min.js"></script> -->
     <script src="js/natural.js"></script>
     <script src="js/bootbox.min.js"></script>
     <script src="js/bootstrap-notify.min.js"></script>
@@ -69,59 +71,54 @@
   <body>
       <div id="container">
           <header>
-              <nav id="headercontainer" class="navbar navbar-default navbar-fixed-top">
-                  <button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#MainNav" aria-expanded="false">
-                      <span class="sr-only">Toggle navigation</span>
-                      <span class="icon-bar"></span>
-                      <span class="icon-bar"></span>
-                      <span class="icon-bar"></span>
-                  </button>
-                  <a class="navbar-left" href="home">
-                      <img width="48" height="48" class="d-inline-block align-top" src="images/mylarlogo.png" alt="mylar">
-                  </a>
-                  <a class="navbar-brand" href=""home">
-                    Mylar
-                  </a>
-                  <nav class="collapse navbar-collapse" id="MainNav">
-                      <ul class="nav navbar-nav">
-                          <li>
-                                <%
-                                wanted_link = 'upcoming'
-                                if mylar.WANTED_TAB_OFF:
-                                    wanted_link = '#'
-                                %>
-                                <a href="${wanted_link}" class="navbarele">Wanted</a>
-                          </li>
-                          <li>
-                                <%
-                                thisweek_image = 'images/green-circle.png'
-                                if mylar.PULLNEW == 'no':
-                                    thisweek_image = 'images/grey-circle.png'
-                                %>
-                                <a href="pullist" class="navbarele"><img src="${thisweek_image}" height="10" width="10"/> This Week</a>
-                          </li>
-                          <li><a href="manage" class="navbarele">Manage</a></li>
-                          <li><a href="history" class="navbarele">History</a></li>
-                          <li><a href="logs" class="navbarele">Logs</a></li>
-                          <li><a href="config" class="navbarcfg">Config</a></li>
-                      </ul>
-                      <form action="searchit" method="get">
-                          <div class="form-group">
+              <nav id="headercontainer" class="navbar navbar-dark navbar-expand-lg bg-primary fixed-top justify-content-between flex-column">
+                  <div class="container flex-row">
+                      <button type="button" class="navbar-toggler collapsed" data-toggle="collapse" data-target="#MainNav" aria-expanded="false">
+                          <!-- <span class="sr-only">Toggle navigation</span> -->
+                          <span class="navbar-toggler-icon"></span>
+                      </button>
+                      <a class="navbar-left mr-2" href="home">
+                          <img width="48" height="48" class="d-inline-block align-top" src="images/mylarlogo.png" alt="mylar">
+                      </a>
+                      <a class="navbar-brand" href="home">
+                        Mylar
+                      </a>
+                      <nav class="collapse navbar-collapse" id="MainNav">
+                          <ul class="navbar-nav mr-auto">
+                              <li class="nav-item">
+                                    <%
+                                    wanted_link = 'upcoming'
+                                    if mylar.WANTED_TAB_OFF:
+                                        wanted_link = '#'
+                                    %>
+                                    <a href="${wanted_link}" class="nav-link">Wanted</a>
+                              </li>
+                              <li class="nav-item">
+                                    <%
+                                    thisweek_image = 'images/green-circle.png'
+                                    if mylar.PULLNEW == 'no':
+                                        thisweek_image = 'images/grey-circle.png'
+                                    %>
+                                    <a href="pullist" class="nav-link"><img src="${thisweek_image}" height="10" width="10"/> This Week</a>
+                              </li>
+                              <li class="nav-item"><a href="manage" class="nav-link">Manage</a></li>
+                              <li class="nav-item"><a href="history" class="nav-link">History</a></li>
+                              <li class="nav-item"><a href="logs" class="nav-link">Logs</a></li>
+                              <li class="nav-item"><a href="config" class="nav-link">Config</a></li>
+                          </ul>
+                          <form class="form-inline" action="searchit" method="get">
                               <label class="sr-only">Search</label>
-                              <div class="input-group">
-                                  <input type="text" value="" placeholder="Search" onfocus="if(this.value==this.defaultValue) this.value='';" name="name" class="form-control"/>
-                                  <span class="input-group-btn">
-                                      <button type="submit" value="Search" class="btn btn-sm btn-primary" data-toggle="tooltip" data-placement="bottom" title="Search"><i class="fa fa-search"></i></button>
-                                  </span>
-                              </div>
-                          </div>
-                      </form>
-                  </nav>
-                  <div id="subnav" class="navbar-inverse">
-                      <div id="subhead" class="container">
-                          ${next.headerIncludes()}
-                      </div>
+                              <input type="text" value="" placeholder="Search" onfocus="if(this.value==this.defaultValue) this.value='';" name="name" class="form-inline"/>
+                              <button type="submit" value="Search" class="btn btn-sm btn-primary my-2 my-sm-0" data-toggle="tooltip" data-placement="bottom" title="Search"><i class="fa fa-search"></i></button>
+                          </form>
+                      </nav>
                   </div>
+              </nav>
+              <nav id="subheadercontainer" class="navbar navbar-light navbar-expand-lg bg-dark justify-content-between py-1">
+                  <div id="subhead" class="container flex-row">
+                      ${next.headerIncludes()}
+                  </div>
+              </nav>
           </header>
       <div id="main" class="main container">
         ${next.body()}

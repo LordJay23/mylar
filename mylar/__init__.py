@@ -333,7 +333,7 @@ def build_bootstrap_themes():
         logger.info("Bootstrap not installed.")
         return themelist  # return empty if bootstrap interface not installed
 
-    URL = 'http://bootswatch.com/api/3.json'
+    URL = 'http://bootswatch.com/api/4.json'
     result, success = helpers.fetchURL(URL, None, False)  # use default headers, no retry
 
     if not success:
